@@ -208,8 +208,8 @@ class DataCleanserApp:
     def _trabajador_procesamiento(self):
         filas_procesadas = 0
         archivos_exitosos = 0
+        archivos_corruptos = 0
         
-        # FUNCION BLINDADA PARA ASEGURAR QUE NUNCA QUEDE COLGADO
         def finalizar_ui(error_msg=None):
             self.hilo_activo = False
             self.btn_iniciar.config(state="normal")
@@ -222,14 +222,18 @@ class DataCleanserApp:
             
             if error_msg:
                 self.lbl_estado_principal.config(text="ERROR FATAL.", fg="red")
-                messagebox.showerror("Error de Archivo", f"Se detuvo la lectura por un archivo corrupto o inválido:\n\n{error_msg}")
+                messagebox.showerror("Error de Archivo", f"Se detuvo la lectura por un error crítico:\n\n{error_msg}")
             elif self.cancelado:
                 self.lbl_estado_principal.config(text="PROCESO CANCELADO.", fg="red")
                 if filas_procesadas > 0:
                     messagebox.showinfo("Carga Detenida", f"Se guardaron {filas_procesadas} filas leídas exitosamente antes de cancelar.")
             else:
                 self.notebook.select(self.tab_datos)
-                messagebox.showinfo("Lectura Terminada", f"Se leyeron {archivos_exitosos} archivos.\nTotal filas en memoria: {filas_procesadas}.\n¡Presioná 'Cruzar Datos' para limpiarlos y extraer teléfonos!")
+                msg_final = f"Se leyeron {archivos_exitosos} archivos.\nTotal filas en memoria: {filas_procesadas}."
+                if archivos_corruptos > 0:
+                    msg_final += f"\n\n⚠️ ATENCIÓN: Se omitieron {archivos_corruptos} archivos por estar corruptos o tener formatos inválidos."
+                msg_final += "\n\n¡Presioná 'Cruzar Datos' para limpiarlos y extraer teléfonos!"
+                messagebox.showinfo("Lectura Terminada", msg_final)
                 
         try:
             self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Escaneando y filtrando carpetas...", fg="blue"))
@@ -274,7 +278,6 @@ class DataCleanserApp:
                 self.root.after(0, lambda p=porcentaje: self.lbl_porcentaje.config(text=f"{p}%"))
                 self.root.after(0, lambda n=nombre_arch: self.lbl_archivo_actual.config(text=f"Leyendo: {n}...", fg="blue"))
                 
-                # INVOCO AL BACKEND
                 df_temp, filas = backend_cleanser.procesar_un_archivo(ruta_actual)
                 
                 if not df_temp.empty:
@@ -282,16 +285,18 @@ class DataCleanserApp:
                     filas_procesadas += filas
                     archivos_exitosos += 1
                     self.root.after(0, lambda f=filas_procesadas: self.lbl_filas_memoria.config(text=f"Filas cargadas: {f}"))
+                else:
+                    archivos_corruptos += 1
                 
                 archivos_procesados += 1
                 self.root.after(0, self._quitar_primero_y_refrescar)
                 
-            # GUARDA SIEMPRE INCLUSO SI FUE CANCELADO
             if df_acumulado:
                 self.root.after(0, lambda: self.var_progreso.set(99))
                 self.root.after(0, lambda: self.lbl_porcentaje.config(text="99%"))
-                self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Consolidando datos de forma ultra rápida...", fg="#E91E63", font=("Arial", 10, "bold")))
+                self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Consolidando datos sin errores de índices...", fg="#E91E63", font=("Arial", 10, "bold")))
                 
+                # Al haber eliminado duplicados de columnas en el backend, el concat nunca más fallará
                 df_nuevo = pd.concat(df_acumulado, ignore_index=True)
                 
                 if not self.df_maestro.empty:
@@ -306,7 +311,6 @@ class DataCleanserApp:
             self.root.after(0, finalizar_ui)
             
         except Exception as e:
-            # SI ALGO EXPLOTA, ATRAMPAMOS EL ERROR Y NO SE CONGELA
             self.root.after(0, lambda err=str(e): finalizar_ui(err))
 
     # ==========================================

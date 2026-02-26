@@ -120,18 +120,31 @@ def separar_telefonos(texto_crudo):
 def estandarizar_columnas(df):
     cols_str = [str(c).lower().strip() for c in df.columns]
     mapa = {}
+    asignados = set() # <--- ESCUDO: Recuerda qué columnas ya renombramos
+    
     for original, minuscula in zip(df.columns, cols_str):
+        nuevo_nombre = None
         if 'vend' in minuscula: 
-            mapa[original] = 'Vendedor'
+            nuevo_nombre = 'Vendedor'
         elif 'zona' in minuscula or 'locali' in minuscula or 'ciudad' in minuscula or 'ubic' in minuscula: 
-            mapa[original] = 'Zona_Cruda'
+            nuevo_nombre = 'Zona_Cruda'
         elif 'tel' in minuscula or 'cel' in minuscula or 'móvil' in minuscula or 'contacto' in minuscula: 
-            mapa[original] = 'Telefonos_Raw'
+            nuevo_nombre = 'Telefonos_Raw'
         elif 'cód' in minuscula or 'cod' in minuscula or 'nro' in minuscula or 'código' in minuscula: 
-            mapa[original] = 'Numero_Cliente'
+            nuevo_nombre = 'Numero_Cliente'
         elif 'nombre' in minuscula or 'cliente' in minuscula or 'razon' in minuscula or 'razón' in minuscula or 'social' in minuscula: 
-            mapa[original] = 'Nombre'
-    return df.rename(columns=mapa)
+            nuevo_nombre = 'Nombre'
+            
+        # Si encontró un nombre y NO lo usamos todavía, lo renombra.
+        if nuevo_nombre and nuevo_nombre not in asignados:
+            mapa[original] = nuevo_nombre
+            asignados.add(nuevo_nombre)
+            
+    df = df.rename(columns=mapa)
+    
+    # MUY IMPORTANTE: Elimina cualquier columna que haya quedado duplicada y rompa Pandas
+    df = df.loc[:, ~df.columns.duplicated()].copy()
+    return df
 
 def primer_valido(series):
     """Extrae el primer dato real ignorando celdas vacías."""
@@ -139,7 +152,6 @@ def primer_valido(series):
     return s.iloc[0] if not s.empty else ""
 
 def procesar_un_archivo(ruta):
-    """Método Vectorizado Blindado a prueba de errores"""
     try:
         if ruta.endswith('.csv'): df_temp = pd.read_csv(ruta, dtype=str, header=None)
         else: df_temp = pd.read_excel(ruta, dtype=str, header=None)
@@ -168,11 +180,11 @@ def procesar_un_archivo(ruta):
         for col in ['Nombre', 'Numero_Cliente', 'Zona_Cruda', 'Vendedor']:
             if col not in df_temp.columns: df_temp[col] = ""
             
-        # 1. Rellenar Número de Cliente hacia abajo (Solución Anti-Crash)
+        # Rellenar Número de Cliente hacia abajo
         df_temp['Numero_Cliente'] = df_temp['Numero_Cliente'].replace(r'^\s*$', np.nan, regex=True).ffill()
         df_temp['Numero_Cliente'] = np.where(df_temp['Numero_Cliente'].isna(), "SinID_" + df_temp.index.astype(str), df_temp['Numero_Cliente'])
         
-        # 2. Vectorización Rápida (Solución de Congelamientos)
+        # Vectorización Rápida
         for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
             df_temp[col] = df_temp[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
             df_temp[col] = df_temp.groupby('Numero_Cliente')[col].transform(lambda x: x.ffill().bfill())
@@ -185,8 +197,8 @@ def procesar_un_archivo(ruta):
         
         return df_agrupado, len(df_temp)
     except Exception as e:
-        print(f"Error procesando {ruta}: {str(e)}")
-        raise RuntimeError(f"Fallo al leer archivo {os.path.basename(ruta)}")
+        print(f"Archivo omitido por error: {ruta} -> {e}")
+        return pd.DataFrame(), 0
 
 def procesar_cruce(df_maestro, progress_callback=None):
     try:
