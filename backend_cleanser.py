@@ -69,30 +69,20 @@ MAPA_ZONAS = {
 }
 
 def extraer_zona_inteligente(texto_fila, zona_cruda):
-    """Busca a fondo la zona real combinando todas las celdas del cliente."""
     texto = (str(texto_fila) + " | " + str(zona_cruda)).upper()
-    
-    # 1. Búsqueda estricta del código numérico (ej: 103, 142)
     matches = re.findall(r'\b(1[0-4]\d)\b', texto)
     for m in matches:
-        if m in MAPA_ZONAS:
-            return f"{m} | {MAPA_ZONAS[m]}"
+        if m in MAPA_ZONAS: return f"{m} | {MAPA_ZONAS[m]}"
             
-    # 2. Búsqueda por palabra clave descriptiva (ej: "ZONA OESTE")
     for num, desc in MAPA_ZONAS.items():
         clave = desc.split('(')[0].strip().upper()
-        if clave in texto and clave not in ["ZONA", "RUTA", "ZONA SUR", "ZONA NORTE"]:
-            return f"{num} | {desc}"
+        if clave in texto and clave not in ["ZONA", "RUTA", "ZONA SUR", "ZONA NORTE"]: return f"{num} | {desc}"
             
-    # 3. Genéricos
     if "ZONA SUR" in texto: return "102 o 104 | ZONA SUR"
     if "ZONA NORTE" in texto: return "101 | ZONA NORTE"
     
-    # 4. Si no encontró en la base, deja lo que había
     zc = str(zona_cruda).strip()
-    if zc and zc.lower() != 'nan':
-        return zc
-        
+    if zc and zc.lower() != 'nan': return zc
     return "Desconocida"
 
 # ==========================================
@@ -102,7 +92,6 @@ def separar_telefonos(texto_crudo):
     if pd.isna(texto_crudo): return []
     texto = str(texto_crudo).strip()
     
-    # Pre-limpieza para evitar que se coma los CUITs y las fechas
     texto = re.sub(r'\b\d{2}-\d{8}-\d{1}\b', '', texto)
     texto = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', texto)
     
@@ -111,6 +100,11 @@ def separar_telefonos(texto_crudo):
     telefonos_limpios = []
     for parte in partes:
         num_puro = ''.join(filter(str.isdigit, parte))
+        
+        # ESCUDO ANTI-CEROS: Evita atrapar IDs de clientes (ej: 0000001485)
+        if num_puro.startswith("000"):
+            continue
+            
         if len(num_puro) >= 8 and len(num_puro) <= 15:
             telefonos_limpios.append(num_puro)
             
@@ -120,34 +114,25 @@ def separar_telefonos(texto_crudo):
 def estandarizar_columnas(df):
     cols_str = [str(c).lower().strip() for c in df.columns]
     mapa = {}
-    asignados = set() # <--- ESCUDO: Recuerda qué columnas ya renombramos
+    asignados = set() 
     
     for original, minuscula in zip(df.columns, cols_str):
         nuevo_nombre = None
-        if 'vend' in minuscula: 
-            nuevo_nombre = 'Vendedor'
-        elif 'zona' in minuscula or 'locali' in minuscula or 'ciudad' in minuscula or 'ubic' in minuscula: 
-            nuevo_nombre = 'Zona_Cruda'
-        elif 'tel' in minuscula or 'cel' in minuscula or 'móvil' in minuscula or 'contacto' in minuscula: 
-            nuevo_nombre = 'Telefonos_Raw'
-        elif 'cód' in minuscula or 'cod' in minuscula or 'nro' in minuscula or 'código' in minuscula: 
-            nuevo_nombre = 'Numero_Cliente'
-        elif 'nombre' in minuscula or 'cliente' in minuscula or 'razon' in minuscula or 'razón' in minuscula or 'social' in minuscula: 
-            nuevo_nombre = 'Nombre'
+        if 'vend' in minuscula: nuevo_nombre = 'Vendedor'
+        elif 'zona' in minuscula or 'locali' in minuscula or 'ciudad' in minuscula or 'ubic' in minuscula: nuevo_nombre = 'Zona_Cruda'
+        elif 'tel' in minuscula or 'cel' in minuscula or 'móvil' in minuscula or 'contacto' in minuscula: nuevo_nombre = 'Telefonos_Raw'
+        elif 'cód' in minuscula or 'cod' in minuscula or 'nro' in minuscula or 'código' in minuscula: nuevo_nombre = 'Numero_Cliente'
+        elif 'nombre' in minuscula or 'cliente' in minuscula or 'razon' in minuscula or 'razón' in minuscula or 'social' in minuscula: nuevo_nombre = 'Nombre'
             
-        # Si encontró un nombre y NO lo usamos todavía, lo renombra.
         if nuevo_nombre and nuevo_nombre not in asignados:
             mapa[original] = nuevo_nombre
             asignados.add(nuevo_nombre)
             
     df = df.rename(columns=mapa)
-    
-    # MUY IMPORTANTE: Elimina cualquier columna que haya quedado duplicada y rompa Pandas
     df = df.loc[:, ~df.columns.duplicated()].copy()
     return df
 
 def primer_valido(series):
-    """Extrae el primer dato real ignorando celdas vacías."""
     s = series.astype(str).str.strip().replace(['nan', 'None', ''], np.nan).dropna()
     return s.iloc[0] if not s.empty else ""
 
@@ -156,7 +141,6 @@ def procesar_un_archivo(ruta):
         if ruta.endswith('.csv'): df_temp = pd.read_csv(ruta, dtype=str, header=None)
         else: df_temp = pd.read_excel(ruta, dtype=str, header=None)
         
-        # BUSCADOR INTELIGENTE DE ENCABEZADO
         header_idx = 0
         encabezado_encontrado = False
         for idx, row in df_temp.head(30).iterrows():
@@ -174,17 +158,14 @@ def procesar_un_archivo(ruta):
         df_temp = df_temp.iloc[header_idx+1:].reset_index(drop=True)
         df_temp = estandarizar_columnas(df_temp)
         
-        # SÚPER ESCÁNER: Todo el texto a una sola celda
         df_temp['Row_String'] = df_temp.apply(lambda row: ' | '.join(row.dropna().astype(str)), axis=1)
         
         for col in ['Nombre', 'Numero_Cliente', 'Zona_Cruda', 'Vendedor']:
             if col not in df_temp.columns: df_temp[col] = ""
             
-        # Rellenar Número de Cliente hacia abajo
         df_temp['Numero_Cliente'] = df_temp['Numero_Cliente'].replace(r'^\s*$', np.nan, regex=True).ffill()
         df_temp['Numero_Cliente'] = np.where(df_temp['Numero_Cliente'].isna(), "SinID_" + df_temp.index.astype(str), df_temp['Numero_Cliente'])
         
-        # Vectorización Rápida
         for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
             df_temp[col] = df_temp[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
             df_temp[col] = df_temp.groupby('Numero_Cliente')[col].transform(lambda x: x.ffill().bfill())
@@ -210,7 +191,6 @@ def procesar_cruce(df_maestro, progress_callback=None):
         
         if progress_callback: progress_callback(15, "Agrupando clientes duplicados en alta velocidad...")
         
-        # Misma Vectorización Rápida para cruzar datos de múltiples Excels
         for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
             df[col] = df[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
             df[col] = df.groupby('Clave_Agrupacion')[col].transform(lambda x: x.ffill().bfill()).fillna("")
@@ -235,11 +215,9 @@ def procesar_cruce(df_maestro, progress_callback=None):
             v = str(row['Vendedor']).strip()
             texto_total = str(row['Row_String'])
             
-            # EXTRACCIÓN MAESTRA
             telefonos_encontrados = separar_telefonos(texto_total)
             zona_enriquecida = extraer_zona_inteligente(texto_total, row.get('Zona_Cruda', ''))
             
-            # Filtros de basura
             if n == "" and c.startswith("SinID_") and len(telefonos_encontrados) == 0: continue
             if "cód." in n.lower() or "fecha:" in n.lower() or "hoja:" in n.lower() or "wood tools" in n.lower(): continue
             if "clientes habilitados" in n.lower() or "ordenado por" in n.lower(): continue
