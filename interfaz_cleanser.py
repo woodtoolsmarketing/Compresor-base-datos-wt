@@ -1,12 +1,22 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
+import sys
 import time
 import threading
 import pandas as pd
 from datetime import datetime
+from PIL import Image, ImageTk
 
 import backend_cleanser
+
+def resource_path(relative_path):
+    """Obtiene la ruta absoluta para que las imágenes funcionen adentro del .exe"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class DataCleanserApp:
     def __init__(self, root):
@@ -14,6 +24,15 @@ class DataCleanserApp:
         self.root.title("Motor de Unificación y Limpieza de Datos - WoodTools")
         self.root.geometry("1150x750")
         
+        # ==========================================
+        # CARGA DE ÍCONO DE VENTANA Y BARRA DE TAREAS (.ico)
+        # ==========================================
+        try:
+            ruta_ico = resource_path(os.path.join("Imagenes", "logo.ico"))
+            self.root.iconbitmap(ruta_ico)
+        except Exception as e:
+            print("Aviso: No se encontró logo.ico")
+
         backend_cleanser.inicializar_db()
         self.df_maestro = pd.DataFrame()
         self.df_final = pd.DataFrame()
@@ -31,6 +50,24 @@ class DataCleanserApp:
         
         tk.Label(frame_top, text="🧠 CEREBRO DE DATOS WOODTOOLS", fg="white", bg="#2b2b2b", font=("Segoe UI", 16, "bold")).pack(side=tk.LEFT)
         
+        # ==========================================
+        # CARGA DE LOGO SIMÉTRICO EN LA CABECERA (.png)
+        # ==========================================
+        try:
+            ruta_png = resource_path(os.path.join("Imagenes", "logo.png"))
+            imagen_original = Image.open(ruta_png)
+            # Achicamos la imagen a 45x45 píxeles para que entre perfecta en la barra oscura
+            imagen_redimensionada = imagen_original.resize((45, 45), Image.LANCZOS)
+            self.logo_img = ImageTk.PhotoImage(imagen_redimensionada)
+
+            # Lo pegamos del lado derecho de la misma cabecera oscura
+            lbl_logo = tk.Label(frame_top, image=self.logo_img, bg="#2b2b2b")
+            lbl_logo.pack(side=tk.RIGHT)
+        except Exception as e:
+            print("Aviso: No se encontró logo.png")
+            
+        # ------------------------------------------
+
         frame_botones = tk.Frame(root, pady=10, padx=20)
         frame_botones.pack(fill="x")
         
@@ -433,6 +470,16 @@ class DataCleanserApp:
         except: pass
 
 if __name__ == "__main__":
+    # --- TRUCO PARA FORZAR EL ÍCONO EN LA BARRA DE TAREAS DE WINDOWS ---
+    try:
+        import ctypes
+        # Creamos un ID único para tu programa
+        myappid = 'woodtools.compresor.datos.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except Exception:
+        pass # Si no estamos en Windows, simplemente lo ignora
+    # -------------------------------------------------------------------
+    
     root = tk.Tk()
     app = DataCleanserApp(root)
     root.mainloop()
