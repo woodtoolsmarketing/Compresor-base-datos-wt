@@ -24,14 +24,11 @@ class DataCleanserApp:
         self.root.title("Motor de Unificación y Limpieza de Datos - WoodTools")
         self.root.geometry("1150x750")
         
-        # ==========================================
-        # CARGA DE ÍCONO DE VENTANA Y BARRA DE TAREAS (.ico)
-        # ==========================================
         try:
             ruta_ico = resource_path(os.path.join("Imagenes", "logo.ico"))
             self.root.iconbitmap(ruta_ico)
         except Exception as e:
-            print("Aviso: No se encontró logo.ico")
+            pass
 
         backend_cleanser.inicializar_db()
         self.df_maestro = pd.DataFrame()
@@ -42,39 +39,28 @@ class DataCleanserApp:
         self.pausado = False
         self.cancelado = False
         
-        # ==========================================
-        # INTERFAZ GRÁFICA
-        # ==========================================
         frame_top = tk.Frame(root, pady=15, padx=20, bg="#2b2b2b")
         frame_top.pack(fill="x")
-        
         tk.Label(frame_top, text="🧠 CEREBRO DE DATOS WOODTOOLS", fg="white", bg="#2b2b2b", font=("Segoe UI", 16, "bold")).pack(side=tk.LEFT)
         
-        # ==========================================
-        # CARGA DE LOGO SIMÉTRICO EN LA CABECERA (.png)
-        # ==========================================
         try:
             ruta_png = resource_path(os.path.join("Imagenes", "logo.png"))
             imagen_original = Image.open(ruta_png)
-            # Achicamos la imagen a 45x45 píxeles para que entre perfecta en la barra oscura
             imagen_redimensionada = imagen_original.resize((45, 45), Image.LANCZOS)
             self.logo_img = ImageTk.PhotoImage(imagen_redimensionada)
-
-            # Lo pegamos del lado derecho de la misma cabecera oscura
-            lbl_logo = tk.Label(frame_top, image=self.logo_img, bg="#2b2b2b")
-            lbl_logo.pack(side=tk.RIGHT)
+            tk.Label(frame_top, image=self.logo_img, bg="#2b2b2b").pack(side=tk.RIGHT)
         except Exception as e:
-            print("Aviso: No se encontró logo.png")
+            pass
             
-        # ------------------------------------------
-
         frame_botones = tk.Frame(root, pady=10, padx=20)
         frame_botones.pack(fill="x")
         
         tk.Button(frame_botones, text="📂 1. Cargar Archivo", command=self.cargar_archivo_individual, bg="#4CAF50", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_botones, text="📁 1. Rastrear Carpeta (Filtro Auto)", command=self.cargar_carpeta_windows, bg="#FF9800", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_botones, text="🧹 2. Cruzar Datos y Eliminar Duplicados", command=self.iniciar_cruce_fondo, bg="#2196F3", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=30)
+        
         tk.Button(frame_botones, text="📥 3. EXPORTAR BASE FINAL", command=self.exportar_excel, bg="#E91E63", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=5)
+        tk.Button(frame_botones, text="⚙️ Configurar Celulares", command=self.abrir_config_vendedores, bg="#607D8B", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=10)
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
@@ -104,19 +90,29 @@ class DataCleanserApp:
         
         frame_proceso_accion = tk.Frame(self.tab_cola, pady=20, bg="#f5f5f5")
         frame_proceso_accion.pack(fill="x", side="bottom")
-        
         self.btn_iniciar = tk.Button(frame_proceso_accion, text="▶ INICIAR LECTURA", command=self.iniciar_procesamiento_fondo, bg="#4CAF50", fg="white", font=("Segoe UI", 12, "bold"), width=30)
         self.btn_iniciar.pack(pady=10)
         
         # PESTAÑA BASE DE DATOS
-        self.tree = ttk.Treeview(self.tab_datos, columns=("Nom", "Nro", "Zona", "Vend", "InfoExtra"), show="headings")
+        frame_tabla = tk.Frame(self.tab_datos)
+        frame_tabla.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.tree = ttk.Treeview(frame_tabla, columns=("Nom", "Nro", "Zona", "Vend", "InfoExtra"), show="headings")
         self.tree.heading("Nom", text="Nombre"); self.tree.column("Nom", width=200)
         self.tree.heading("Nro", text="Nro Cliente"); self.tree.column("Nro", width=100)
         self.tree.heading("Zona", text="Zona Cruda"); self.tree.column("Zona", width=150)
-        self.tree.heading("Vend", text="Vendedor"); self.tree.column("Vend", width=100)
-        self.tree.heading("InfoExtra", text="Data Extraída (Pre-Cruce)"); self.tree.column("InfoExtra", width=350)
-        scroll = ttk.Scrollbar(self.tab_datos, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscroll=scroll.set); scroll.pack(side="right", fill="y"); self.tree.pack(fill="both", expand=True)
+        self.tree.heading("Vend", text="Código Vendedor"); self.tree.column("Vend", width=120)
+        self.tree.heading("InfoExtra", text="Data Extraída"); self.tree.column("InfoExtra", width=300)
+        
+        scroll = ttk.Scrollbar(frame_tabla, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
+        
+        frame_edicion = tk.Frame(self.tab_datos, pady=5)
+        frame_edicion.pack(fill="x", side="bottom")
+        tk.Button(frame_edicion, text="✏️ Editar Fila Seleccionada", command=self.editar_cliente_ui, bg="#009688", fg="white", font=("Arial", 10, "bold")).pack(side="right", padx=20)
+        tk.Label(frame_edicion, text="Hacé clic en un cliente de arriba y presioná el botón para corregir su vendedor a mano.", fg="gray").pack(side="right", padx=10)
         
         # PESTAÑA HISTORIAL
         self.tree_hist = ttk.Treeview(self.tab_historial, columns=("ID", "Fec", "Tipo", "Ruta", "Regs"), show="headings")
@@ -129,8 +125,115 @@ class DataCleanserApp:
         
         self.lbl_estado_principal = tk.Label(root, text="Esperando instrucciones...", fg="gray", font=("Arial", 10, "bold"))
         self.lbl_estado_principal.pack(side="bottom", pady=5)
-        
         self.actualizar_tabla_historial()
+
+    # ==========================================
+    # EDICIÓN INDIVIDUAL DE UN CLIENTE
+    # ==========================================
+    def editar_cliente_ui(self):
+        if self.df_final.empty:
+            return messagebox.showwarning("Atención", "Primero debes presionar 'Cruzar Datos' (Paso 2) para poder editar a los clientes finales.")
+            
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return messagebox.showwarning("Atención", "Hacé clic en un cliente de la tabla para seleccionarlo y luego presioná Editar.")
+            
+        item_id = seleccion[0]
+        valores = self.tree.item(item_id, "values")
+        
+        vent_edit = tk.Toplevel(self.root)
+        vent_edit.title("Editar Cliente Específico")
+        vent_edit.geometry("450x300")
+        vent_edit.transient(self.root)
+        vent_edit.grab_set()
+        
+        tk.Label(vent_edit, text="Corregir datos del cliente:", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
+        
+        campos = ["Nombre:", "Nro Cliente:", "Zona:", "Código Vendedor:", "Teléfonos:"]
+        entradas = []
+        
+        for i, campo in enumerate(campos):
+            tk.Label(vent_edit, text=campo, font=("Arial", 10)).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
+            ent = tk.Entry(vent_edit, width=40)
+            ent.insert(0, str(valores[i]))
+            ent.grid(row=i+1, column=1, padx=10, pady=5)
+            entradas.append(ent)
+            
+        def guardar_edicion():
+            nuevos_val = [e.get().strip() for e in entradas]
+            self.tree.item(item_id, values=nuevos_val)
+            
+            nro_original = valores[1]
+            idx_list = self.df_final.index[self.df_final['Número de cliente'] == nro_original].tolist()
+            
+            if idx_list:
+                idx = idx_list[0]
+                self.df_final.at[idx, 'Nombre'] = nuevos_val[0]
+                self.df_final.at[idx, 'Número de cliente'] = nuevos_val[1]
+                self.df_final.at[idx, 'Zona del cliente'] = nuevos_val[2]
+                self.df_final.at[idx, 'Vendedor'] = nuevos_val[3] 
+                
+                # Para que no te borre todos los números si cambiaste de vendedor
+                tels = [t.strip() for t in nuevos_val[4].split('|') if t.strip()]
+                self.df_final.at[idx, 'Primer número'] = tels[0] if len(tels) > 0 else ""
+                self.df_final.at[idx, 'Segundo número'] = tels[1] if len(tels) > 1 else ""
+                self.df_final.at[idx, 'Tercer número'] = tels[2] if len(tels) > 2 else ""
+                self.df_final.at[idx, 'Cuarto número'] = tels[3] if len(tels) > 3 else ""
+                self.df_final.at[idx, 'Quinto número'] = tels[4] if len(tels) > 4 else ""
+                
+            vent_edit.destroy()
+            messagebox.showinfo("Guardado", f"El cliente {nuevos_val[0]} fue actualizado con éxito.\nSe guardó con el código de vendedor: {nuevos_val[3]}.", parent=self.root)
+            
+        tk.Button(vent_edit, text="💾 Guardar Cambios", command=guardar_edicion, bg="#4CAF50", fg="white", font=("bold", 10)).grid(row=len(campos)+1, column=0, columnspan=2, pady=15)
+
+    # ==========================================
+    # MENU DE CONFIGURACIÓN DE VENDEDORES (GENERAL)
+    # ==========================================
+    def abrir_config_vendedores(self):
+        vent_conf = tk.Toplevel(self.root)
+        vent_conf.title("Base de Datos: Vendedores")
+        vent_conf.geometry("400x480")
+        vent_conf.transient(self.root)
+        vent_conf.grab_set()
+
+        tk.Label(vent_conf, text="Directorio de Celulares para el Bot", font=("Segoe UI", 12, "bold"), fg="#2b2b2b").pack(pady=10)
+        
+        frame_lista = tk.Frame(vent_conf)
+        frame_lista.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(frame_lista, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame_lista, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        mapa = backend_cleanser.cargar_mapa_vendedores()
+        self.entradas_vend = {}
+        
+        tk.Label(scrollable_frame, text="Código Exportado", font=("Arial", 9, "bold")).grid(row=0, column=0, padx=5, pady=5)
+        tk.Label(scrollable_frame, text="Celular Real", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5, pady=5)
+        
+        for i, (cod, tel) in enumerate(mapa.items(), start=1):
+            tk.Label(scrollable_frame, text=f"Código [{cod}]:").grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            ent = tk.Entry(scrollable_frame, width=25)
+            ent.insert(0, str(tel))
+            ent.grid(row=i, column=1, padx=5, pady=5)
+            self.entradas_vend[cod] = ent
+            
+        def guardar():
+            nuevo_mapa = {cod: ent.get().strip() for cod, ent in self.entradas_vend.items()}
+            if backend_cleanser.guardar_mapa_vendedores(nuevo_mapa):
+                messagebox.showinfo("Éxito", "Directorio guardado correctamente.\nTu script de WhatsApp leerá este archivo.", parent=vent_conf)
+                vent_conf.destroy()
+            else:
+                messagebox.showerror("Error", "No se pudo guardar la configuración.", parent=vent_conf)
+                
+        tk.Button(vent_conf, text="💾 Guardar Directorio", command=guardar, bg="#4CAF50", fg="white", font=("bold", 11)).pack(pady=10)
 
     # ==========================================
     # LÓGICA DE LA COLA
@@ -166,7 +269,6 @@ class DataCleanserApp:
         self.listbox_cola.delete(0, tk.END)
         for ruta in self.cola_rutas:
             self.listbox_cola.insert(tk.END, os.path.basename(ruta))
-        
         if self.cola_rutas:
             self.btn_iniciar.config(state="normal")
         else:
@@ -208,11 +310,9 @@ class DataCleanserApp:
     def iniciar_procesamiento_fondo(self):
         if not self.cola_rutas: return
         if self.hilo_activo: return
-        
         self.hilo_activo = True
         self.pausado = False
         self.cancelado = False
-        
         self.btn_iniciar.config(state="disabled")
         self.abrir_popup_lectura()
         threading.Thread(target=self._trabajador_procesamiento).start()
@@ -250,7 +350,6 @@ class DataCleanserApp:
         def finalizar_ui(error_msg=None):
             self.hilo_activo = False
             self.btn_iniciar.config(state="normal")
-            
             if hasattr(self, 'vent_progreso') and self.vent_progreso.winfo_exists():
                 self.vent_progreso.destroy()
                 
@@ -275,7 +374,6 @@ class DataCleanserApp:
         try:
             self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Escaneando y filtrando carpetas...", fg="blue"))
             rutas_expandidas = []
-            
             PALABRAS_CLAVE = ['contacto', 'cliente', 'maestro', 'base', 'padron', 'datos', 'zona', 'giras', 'rutas']
             
             for ruta in self.cola_rutas:
@@ -333,7 +431,6 @@ class DataCleanserApp:
                 self.root.after(0, lambda: self.lbl_porcentaje.config(text="99%"))
                 self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Consolidando datos sin errores de índices...", fg="#E91E63", font=("Arial", 10, "bold")))
                 
-                # Al haber eliminado duplicados de columnas en el backend, el concat nunca más fallará
                 df_nuevo = pd.concat(df_acumulado, ignore_index=True)
                 
                 if not self.df_maestro.empty:
@@ -362,7 +459,6 @@ class DataCleanserApp:
         self.vent_cruce.grab_set()
 
         tk.Label(self.vent_cruce, text="Analizando y unificando clientes...", font=("Segoe UI", 12, "bold"), fg="#2196F3").pack(pady=15)
-        
         self.lbl_porcentaje_cruce = tk.Label(self.vent_cruce, text="0%", font=("Segoe UI", 26, "bold"), fg="#FF9800")
         self.lbl_porcentaje_cruce.pack()
 
@@ -406,9 +502,6 @@ class DataCleanserApp:
                 
             self.root.after(0, finalizar_error)
 
-    # ==========================================
-    # ACTUALIZACIÓN DE TABLA SIN CONGELAR (LIMITE 500)
-    # ==========================================
     def actualizar_tabla_datos(self, cruza_finalizada=False):
         for i in self.tree.get_children(): self.tree.delete(i)
         
@@ -439,9 +532,6 @@ class DataCleanserApp:
             texto_extra = f" (Mostrando primeros {LIMITE})" if len(self.df_maestro) > LIMITE else ""
             self.lbl_estado_principal.config(text=f"Registros en memoria: {len(self.df_maestro)}.{texto_extra} Falta cruzar.", fg="orange")
 
-    # ==========================================
-    # EXPORTACIÓN
-    # ==========================================
     def exportar_excel(self):
         if self.df_final.empty:
             return messagebox.showerror("Error", "Primero debes presionar el botón azul de 'Cruzar Datos' para generar la base limpia.")
@@ -470,15 +560,12 @@ class DataCleanserApp:
         except: pass
 
 if __name__ == "__main__":
-    # --- TRUCO PARA FORZAR EL ÍCONO EN LA BARRA DE TAREAS DE WINDOWS ---
     try:
         import ctypes
-        # Creamos un ID único para tu programa
         myappid = 'woodtools.compresor.datos.1.0'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception:
-        pass # Si no estamos en Windows, simplemente lo ignora
-    # -------------------------------------------------------------------
+        pass 
     
     root = tk.Tk()
     app = DataCleanserApp(root)

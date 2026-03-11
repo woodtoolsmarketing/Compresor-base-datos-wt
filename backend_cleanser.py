@@ -3,6 +3,7 @@ import numpy as np
 import os
 import re
 import sqlite3
+import json
 from datetime import datetime
 
 # ==========================================
@@ -41,36 +42,88 @@ def obtener_historial():
     return df
 
 # ==========================================
-# INTELIGENCIA DE ZONAS Y VENDEDORES
+# CONFIGURACIÓN DE VENDEDORES (Para el BOT)
+# ==========================================
+ARCHIVO_VEND = "vendedores_config.json"
+
+def cargar_mapa_vendedores():
+    defaults = {
+        "0": "1145394279 o 1165630406", 
+        "1": "1157528428",
+        "01": "1157528428",
+        "302": "1157528428",
+        "40": "1157528427",
+        "15": "1157528427",
+        "18": "1145640940",
+        "16": "1145640831",
+        "44": "1156321012",
+        "4": "1156321012",
+        "04": "1156321012",
+        "9": "1153455274",
+        "09": "1153455274",
+        "3": "1168457778",
+        "03": "1168457778",
+        "5": "1164591316",
+        "05": "1164591316"
+    }
+    if not os.path.exists(ARCHIVO_VEND):
+        try:
+            with open(ARCHIVO_VEND, 'w', encoding='utf-8') as f:
+                json.dump(defaults, f, indent=4)
+        except: pass
+        return defaults
+    else:
+        try:
+            with open(ARCHIVO_VEND, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return defaults
+
+def guardar_mapa_vendedores(nuevo_mapa):
+    try:
+        with open(ARCHIVO_VEND, 'w', encoding='utf-8') as f:
+            json.dump(nuevo_mapa, f, indent=4)
+        return True
+    except:
+        return False
+
+# ==========================================
+# DICCIONARIO DE ZONAS
 # ==========================================
 MAPA_ZONAS = {
-    '101': 'ZONA NORTE (San Fernando, Tigre, V. Lopez, San Martin)',
-    '102': 'ZONA SUR (Avellaneda, Lanus, Quilmes, Bernal)',
-    '103': 'LA PLATA (Tolosa, Villa Elisa, City Bell, Centro)',
-    '104': 'ZONA SUR (Lomas, Temperley, Monte Grande, Ezeiza)',
-    '107': 'ZONA OESTE (Merlo, Moron, San Justo, Caseros, Ramos Mejia)',
-    '110': 'ZONA CAPITAL (Pompeya, Paternal, Barracas)',
-    '115': 'RUTA 29 (Gral. Belgrano, Brandsen, San Vicente)',
-    '120': 'RUTA 2 (Chascomus, Dolores, Lezama, La Costa)',
-    '122': 'ZONA SUR (Zapala, Junin de los Andes, Bariloche)',
-    '124': 'ZONA 124 (Jauregui, Lujan)',
-    '130': 'RUTA 5 (Trenque Lauquen, Rufino, Olavarria)',
-    '132': 'BAHIA BLANCA / SUR (Olavarria, Tres Arroyos, Tandil)',
-    '136': 'ENTRE RIOS (Gualeguaychu, Concordia, Parana)',
-    '137': 'CORDOBA (Capital, Carlos Paz, Rio IV)',
-    '140': 'ZONA 140 (Areco, Pergamino, San Nicolas)',
-    '141': 'LUJAN / MERCEDES (Giles, Pilar, Mercedes)',
-    '142': 'ROSARIO (Santa Fe, San Nicolas, Ramallo)',
-    '143': 'ZONA 143 (Urdinarrain, Victoria, Crespo)',
-    '144': 'RUTA 5 (Giles, Areco, Salto, Rojas)',
-    '146': 'SALTA (Salta, Catamarca, Tucuman, Jujuy)',
-    '148': 'RUTA 3 (Las Flores, Azul, Rauch)',
-    '149': 'ESPERANZA (Esperanza, Rafaela, Crespo)'
+    '101': 'ZONA NORTE',
+    '102': 'QUILMES',
+    '103': 'LA PLATA / ENSENADA / BERISSO',
+    '104': 'ZONA SUR',
+    '107': 'ZONA OESTE',
+    '110': 'ZONA CAPITAL',
+    '115': 'RUTA 29 / SAN VICENTE',
+    '120': 'RUTA 2',
+    '122': 'SUR II (BARILOCHE, CHUBUT, STA CRUZ, T DEL FUEGO)',
+    '124': 'LUJAN / MERCEDES',
+    '130': 'RUTA 5 (TRENQUE LAUQUEN)',
+    '132': 'RUTA 3 / BAHIA BLANCA',
+    '136': 'ENTRE RIOS',
+    '137': 'CORDOBA',
+    '140': 'RUTA 8',
+    '141': 'RUTA 7 (CHACABUCO)',
+    '142': 'SANTA FE / ROSARIO',
+    '143': 'MESOPOTAMIA (ENTRE RIOS Y CORRIENTES)',
+    '144': 'RUTA 5 Y 7 (BRAGADO / SALTO)',
+    '146': 'NOROESTE (TUCUMAN - SALTA - JUJUY - CATAMARCA)',
+    '148': 'RUTA 3 (TANDIL / OLAVARRIA / AZUL)',
+    '149': 'ESPERANZA / RAFAELA',
+    '150': 'CUYO (MENDOZA - SAN JUAN - SAN LUIS - LA RIOJA)',
+    '151': 'CHACO / FORMOSA',
+    '152': 'MISIONES / CORRIENTES',
+    '155': 'VALLE RIO NEGRO / NEUQUEN',
+    '156': 'MAR DEL PLATA',
+    '301': 'EXTERIOR'
 }
 
 def extraer_zona_inteligente(texto_fila, zona_cruda):
     texto = (str(texto_fila) + " | " + str(zona_cruda)).upper()
-    matches = re.findall(r'\b(1[0-4]\d)\b', texto)
+    matches = re.findall(r'\b(1[0-5]\d|301)\b', texto)
     for m in matches:
         if m in MAPA_ZONAS: return f"{m} | {MAPA_ZONAS[m]}"
             
@@ -87,23 +140,28 @@ def extraer_zona_inteligente(texto_fila, zona_cruda):
 
 def extraer_vendedor_inteligente(texto_crudo, vendedor_actual):
     v = str(vendedor_actual).strip().upper()
-    texto_completo = (str(texto_crudo) + " " + v).upper()
     
-    # 1. Buscamos nombres de vendedores explícitos en el texto y ponemos su nombre real
-    if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "Emmanuel"
-    if re.search(r'\b(VALENTIN|VALENTÍN)\b', texto_completo): return "Valentín"
-    if re.search(r'\b(CARLOS)\b', texto_completo): return "Carlos"
-    if re.search(r'\b(LUIS)\b', texto_completo): return "Luis"
-    
-    # 2. Si no hay nombres pero la columna tiene un dato (que no sea el "0" automático de Tango)
-    if v != "" and v != "NAN" and v != "0":
-        # Extraemos solo el número si está mezclado con letras
-        match_num = re.search(r'\b(\d+)\b', v)
-        if match_num and match_num.group(1) != "0": 
-            return match_num.group(1)
-        return v # Si es un texto raro, que lo deje como está
+    # 1. Buscamos formatos compuestos especiales (Ej: "302/1", "40/15")
+    match_compuesto = re.search(r'\b(\d+/\d+)\b', v)
+    if match_compuesto:
+        return match_compuesto.group(1)
         
-    return "Desconocido"
+    # 2. Si viene un código puro explícito ("0", "1", "44", etc.), lo respetamos
+    if re.match(r'^[\d]+$', v):
+        return v
+        
+    # 3. Si no hay código numérico en la columna, escaneamos la bolsa de texto por nombres
+    texto_completo = (str(texto_crudo) + " " + v).upper()
+    if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "1"
+    if re.search(r'\b(VALENTIN|VALENTÍN|CARLOS)\b', texto_completo): return "0"
+    if re.search(r'\b(LUIS)\b', texto_completo): return "18"
+    
+    # 4. Si encontramos un número incrustado en el texto de la columna (Ej: "Vend 44")
+    match_num = re.search(r'\b(\d+)\b', v)
+    if match_num:
+        return match_num.group(1)
+        
+    return "0"
 
 # ==========================================
 # LÓGICA DE LIMPIEZA Y EXTRACCIÓN
@@ -120,10 +178,7 @@ def separar_telefonos(texto_crudo):
     telefonos_limpios = []
     for parte in partes:
         num_puro = ''.join(filter(str.isdigit, parte))
-        
-        if num_puro.startswith("000"):
-            continue
-            
+        if num_puro.startswith("000"): continue
         if len(num_puro) >= 8 and len(num_puro) <= 15:
             telefonos_limpios.append(num_puro)
             
@@ -170,7 +225,6 @@ def procesar_un_archivo(ruta):
             
             for idx, row in df_temp.head(25).iterrows():
                 row_str = " ".join(row.fillna("").astype(str)).lower()
-                
                 if "-zzzz" in row_str or "-999" in row_str or "z.fiscal" in row_str or "ordenado por" in row_str:
                     continue
                     
@@ -186,7 +240,6 @@ def procesar_un_archivo(ruta):
                         if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio']: score += 3
                 
                 final_score = score * (1 if non_empty_cols > 2 else 0)
-                
                 if final_score > max_score:
                     max_score = final_score
                     best_row = idx
@@ -202,12 +255,9 @@ def procesar_un_archivo(ruta):
             if df_temp.empty: continue
             
             df_temp = estandarizar_columnas(df_temp)
-            
-            if 'Nombre' not in df_temp.columns:
-                continue
+            if 'Nombre' not in df_temp.columns: continue
             
             total_filas += len(df_temp)
-            
             df_temp['Row_String'] = df_temp.apply(lambda row: ' | '.join(row.dropna().astype(str)), axis=1)
             
             for col in ['Nombre', 'Numero_Cliente', 'Zona_Cruda', 'Vendedor']:
@@ -225,7 +275,6 @@ def procesar_un_archivo(ruta):
             
             df_agrupado = df_temp.drop_duplicates(subset=['Numero_Cliente']).copy()
             df_agrupado = df_agrupado.drop(columns=['Row_String']).merge(text_agg, on='Numero_Cliente', how='left')
-            
             df_agrupado_total.append(df_agrupado)
             
         if not df_agrupado_total:
@@ -264,8 +313,7 @@ def procesar_cruce(df_maestro, progress_callback=None):
         for idx, (_, row) in enumerate(df_agrupado.iterrows()):
             if progress_callback and total_filas > 0:
                 if idx % paso_progreso == 0:
-                    porcentaje_real = 15 + int((idx / total_filas) * 85)
-                    progress_callback(porcentaje_real, f"Procesando cliente {idx} de {total_filas}...")
+                    progress_callback(15 + int((idx / total_filas) * 85), f"Procesando cliente {idx} de {total_filas}...")
 
             n = str(row['Nombre']).strip()
             c = str(row['Numero_Cliente']).strip()
@@ -275,21 +323,18 @@ def procesar_cruce(df_maestro, progress_callback=None):
             telefonos_encontrados = separar_telefonos(texto_total)
             zona_enriquecida = extraer_zona_inteligente(texto_total, row.get('Zona_Cruda', ''))
             
-            # --- Magia del Vendedor Corregida ---
+            # --- Devolvemos el CODIGO literal del Vendedor ("0", "40/15", "302") ---
             vend_f = extraer_vendedor_inteligente(texto_total, v)
             
             if n == "" and c.startswith("SinID_") and len(telefonos_encontrados) == 0: continue
             if "cód." in n.lower() or "fecha:" in n.lower() or "hoja:" in n.lower() or "wood tools" in n.lower(): continue
             if "clientes habilitados" in n.lower() or "ordenado por" in n.lower(): continue
             
-            nom_f = n if n != "" else "Cliente Sin Nombre"
-            num_cli = c if not c.startswith("SinID_") else ""
-            
             registro = {
-                'Nombre': nom_f,
-                'Número de cliente': num_cli,
+                'Nombre': n if n != "" else "Cliente Sin Nombre",
+                'Número de cliente': c if not c.startswith("SinID_") else "",
                 'Zona del cliente': zona_enriquecida,
-                'Vendedor': vend_f,
+                'Vendedor': vend_f, 
                 'Primer número': telefonos_encontrados[0] if len(telefonos_encontrados) > 0 else "",
                 'Segundo número': telefonos_encontrados[1] if len(telefonos_encontrados) > 1 else "",
                 'Tercer número': telefonos_encontrados[2] if len(telefonos_encontrados) > 2 else "",
