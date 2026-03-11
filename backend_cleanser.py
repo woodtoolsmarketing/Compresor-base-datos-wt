@@ -41,7 +41,7 @@ def obtener_historial():
     return df
 
 # ==========================================
-# INTELIGENCIA DE ZONAS 
+# INTELIGENCIA DE ZONAS Y VENDEDORES
 # ==========================================
 MAPA_ZONAS = {
     '101': 'ZONA NORTE (San Fernando, Tigre, V. Lopez, San Martin)',
@@ -85,6 +85,26 @@ def extraer_zona_inteligente(texto_fila, zona_cruda):
     if zc and zc.lower() != 'nan': return zc
     return "Desconocida"
 
+def extraer_vendedor_inteligente(texto_crudo, vendedor_actual):
+    v = str(vendedor_actual).strip().upper()
+    texto_completo = (str(texto_crudo) + " " + v).upper()
+    
+    # 1. Buscamos nombres de vendedores explícitos en el texto y ponemos su nombre real
+    if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "Emmanuel"
+    if re.search(r'\b(VALENTIN|VALENTÍN)\b', texto_completo): return "Valentín"
+    if re.search(r'\b(CARLOS)\b', texto_completo): return "Carlos"
+    if re.search(r'\b(LUIS)\b', texto_completo): return "Luis"
+    
+    # 2. Si no hay nombres pero la columna tiene un dato (que no sea el "0" automático de Tango)
+    if v != "" and v != "NAN" and v != "0":
+        # Extraemos solo el número si está mezclado con letras
+        match_num = re.search(r'\b(\d+)\b', v)
+        if match_num and match_num.group(1) != "0": 
+            return match_num.group(1)
+        return v # Si es un texto raro, que lo deje como está
+        
+    return "Desconocido"
+
 # ==========================================
 # LÓGICA DE LIMPIEZA Y EXTRACCIÓN
 # ==========================================
@@ -101,7 +121,6 @@ def separar_telefonos(texto_crudo):
     for parte in partes:
         num_puro = ''.join(filter(str.isdigit, parte))
         
-        # ESCUDO ANTI-CEROS: Evita atrapar IDs de clientes (ej: 0000001485)
         if num_puro.startswith("000"):
             continue
             
@@ -118,65 +137,103 @@ def estandarizar_columnas(df):
     
     for original, minuscula in zip(df.columns, cols_str):
         nuevo_nombre = None
-        if 'vend' in minuscula: nuevo_nombre = 'Vendedor'
-        elif 'zona' in minuscula or 'locali' in minuscula or 'ciudad' in minuscula or 'ubic' in minuscula: nuevo_nombre = 'Zona_Cruda'
-        elif 'tel' in minuscula or 'cel' in minuscula or 'móvil' in minuscula or 'contacto' in minuscula: nuevo_nombre = 'Telefonos_Raw'
-        elif 'cód' in minuscula or 'cod' in minuscula or 'nro' in minuscula or 'código' in minuscula: nuevo_nombre = 'Numero_Cliente'
-        elif 'nombre' in minuscula or 'cliente' in minuscula or 'razon' in minuscula or 'razón' in minuscula or 'social' in minuscula: nuevo_nombre = 'Nombre'
+        if any(p in minuscula for p in ['vend', 'corredor', 'rep', 'agente']): nuevo_nombre = 'Vendedor'
+        elif any(p in minuscula for p in ['zona', 'locali', 'ciudad', 'ubic', 'direc']): nuevo_nombre = 'Zona_Cruda'
+        elif any(p in minuscula for p in ['tel', 'cel', 'móvil', 'movil', 'contacto']): nuevo_nombre = 'Telefonos_Raw'
+        elif any(p in minuscula for p in ['cód', 'cod', 'nro', 'código', 'id']): nuevo_nombre = 'Numero_Cliente'
+        elif any(p in minuscula for p in ['nombre', 'cliente', 'razon', 'razón', 'social']): nuevo_nombre = 'Nombre'
             
         if nuevo_nombre and nuevo_nombre not in asignados:
             mapa[original] = nuevo_nombre
             asignados.add(nuevo_nombre)
             
     df = df.rename(columns=mapa)
-    df = df.loc[:, ~df.columns.duplicated()].copy()
+    df = df.loc[:, ~df.columns.duplicated()].copy() 
     return df
-
-def primer_valido(series):
-    s = series.astype(str).str.strip().replace(['nan', 'None', ''], np.nan).dropna()
-    return s.iloc[0] if not s.empty else ""
 
 def procesar_un_archivo(ruta):
     try:
-        if ruta.endswith('.csv'): df_temp = pd.read_csv(ruta, dtype=str, header=None)
-        else: df_temp = pd.read_excel(ruta, dtype=str, header=None)
+        if ruta.endswith('.csv'): 
+            dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None)]
+        else: 
+            xls = pd.ExcelFile(ruta)
+            dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+            
+        df_agrupado_total = []
+        total_filas = 0
         
-        header_idx = 0
-        encabezado_encontrado = False
-        for idx, row in df_temp.head(30).iterrows():
-            if sum(row.fillna("").astype(str).str.strip() != "") >= 3:
+        for df_temp in dfs_to_process:
+            if df_temp.empty: continue
+            
+            best_row = -1
+            max_score = 0
+            
+            for idx, row in df_temp.head(25).iterrows():
                 row_str = " ".join(row.fillna("").astype(str)).lower()
-                if ("cód" in row_str or "cod" in row_str or "nro" in row_str) and \
-                   ("nombre" in row_str or "razon" in row_str or "cliente" in row_str):
-                    header_idx = idx
-                    encabezado_encontrado = True
-                    break
-        
-        if not encabezado_encontrado: header_idx = 0
+                
+                if "-zzzz" in row_str or "-999" in row_str or "z.fiscal" in row_str or "ordenado por" in row_str:
+                    continue
+                    
+                score = 0
+                non_empty_cols = 0
+                for cell in row.fillna("").astype(str):
+                    c_low = cell.lower().strip()
+                    if c_low:
+                        non_empty_cols += 1
+                        if c_low in ['nombre', 'cliente', 'razon social', 'razón social', 'clientes']: score += 10
+                        if c_low in ['cód.', 'cod.', 'cod', 'código', 'codigo', 'id', 'nro', 'cód']: score += 5
+                        if c_low in ['teléfonos', 'telefono', 'tel', 'cel', 'celular', 'movil', 'contacto']: score += 5
+                        if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio']: score += 3
+                
+                final_score = score * (1 if non_empty_cols > 2 else 0)
+                
+                if final_score > max_score:
+                    max_score = final_score
+                    best_row = idx
+            
+            if max_score >= 10: 
+                header_idx = best_row
+                df_temp.columns = df_temp.iloc[header_idx].fillna(pd.Series([f"Col_{i}" for i in range(len(df_temp.columns))])).astype(str)
+                df_temp = df_temp.iloc[header_idx+1:].reset_index(drop=True)
+            else:
+                df_temp.columns = [f"Col_{i}" for i in range(len(df_temp.columns))]
 
-        df_temp.columns = df_temp.iloc[header_idx].fillna("Col_Vacia").astype(str)
-        df_temp = df_temp.iloc[header_idx+1:].reset_index(drop=True)
-        df_temp = estandarizar_columnas(df_temp)
-        
-        df_temp['Row_String'] = df_temp.apply(lambda row: ' | '.join(row.dropna().astype(str)), axis=1)
-        
-        for col in ['Nombre', 'Numero_Cliente', 'Zona_Cruda', 'Vendedor']:
-            if col not in df_temp.columns: df_temp[col] = ""
+            df_temp = df_temp.dropna(how='all') 
+            if df_temp.empty: continue
             
-        df_temp['Numero_Cliente'] = df_temp['Numero_Cliente'].replace(r'^\s*$', np.nan, regex=True).ffill()
-        df_temp['Numero_Cliente'] = np.where(df_temp['Numero_Cliente'].isna(), "SinID_" + df_temp.index.astype(str), df_temp['Numero_Cliente'])
-        
-        for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
-            df_temp[col] = df_temp[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
-            df_temp[col] = df_temp.groupby('Numero_Cliente')[col].transform(lambda x: x.ffill().bfill())
-            df_temp[col] = df_temp[col].fillna("")
+            df_temp = estandarizar_columnas(df_temp)
             
-        text_agg = df_temp.groupby('Numero_Cliente')['Row_String'].apply(lambda x: ' | '.join(x.astype(str))).reset_index()
+            if 'Nombre' not in df_temp.columns:
+                continue
+            
+            total_filas += len(df_temp)
+            
+            df_temp['Row_String'] = df_temp.apply(lambda row: ' | '.join(row.dropna().astype(str)), axis=1)
+            
+            for col in ['Nombre', 'Numero_Cliente', 'Zona_Cruda', 'Vendedor']:
+                if col not in df_temp.columns: df_temp[col] = ""
+                
+            df_temp['Numero_Cliente'] = df_temp['Numero_Cliente'].replace(r'^\s*$', np.nan, regex=True).ffill()
+            df_temp['Numero_Cliente'] = np.where(df_temp['Numero_Cliente'].isna(), "SinID_" + df_temp.index.astype(str), df_temp['Numero_Cliente'])
+            
+            for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
+                df_temp[col] = df_temp[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
+                df_temp[col] = df_temp.groupby('Numero_Cliente')[col].transform(lambda x: x.ffill().bfill())
+                df_temp[col] = df_temp[col].fillna("")
+                
+            text_agg = df_temp.groupby('Numero_Cliente')['Row_String'].apply(lambda x: ' | '.join(x.astype(str))).reset_index()
+            
+            df_agrupado = df_temp.drop_duplicates(subset=['Numero_Cliente']).copy()
+            df_agrupado = df_agrupado.drop(columns=['Row_String']).merge(text_agg, on='Numero_Cliente', how='left')
+            
+            df_agrupado_total.append(df_agrupado)
+            
+        if not df_agrupado_total:
+            return pd.DataFrame(), 0
+            
+        df_final_archivo = pd.concat(df_agrupado_total, ignore_index=True)
+        return df_final_archivo, total_filas
         
-        df_agrupado = df_temp.drop_duplicates(subset=['Numero_Cliente']).copy()
-        df_agrupado = df_agrupado.drop(columns=['Row_String']).merge(text_agg, on='Numero_Cliente', how='left')
-        
-        return df_agrupado, len(df_temp)
     except Exception as e:
         print(f"Archivo omitido por error: {ruta} -> {e}")
         return pd.DataFrame(), 0
@@ -218,12 +275,14 @@ def procesar_cruce(df_maestro, progress_callback=None):
             telefonos_encontrados = separar_telefonos(texto_total)
             zona_enriquecida = extraer_zona_inteligente(texto_total, row.get('Zona_Cruda', ''))
             
+            # --- Magia del Vendedor Corregida ---
+            vend_f = extraer_vendedor_inteligente(texto_total, v)
+            
             if n == "" and c.startswith("SinID_") and len(telefonos_encontrados) == 0: continue
             if "cód." in n.lower() or "fecha:" in n.lower() or "hoja:" in n.lower() or "wood tools" in n.lower(): continue
             if "clientes habilitados" in n.lower() or "ordenado por" in n.lower(): continue
             
             nom_f = n if n != "" else "Cliente Sin Nombre"
-            vend_f = v if v != "" else "Desconocido"
             num_cli = c if not c.startswith("SinID_") else ""
             
             registro = {
