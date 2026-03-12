@@ -42,9 +42,10 @@ def obtener_historial():
     return df
 
 # ==========================================
-# CONFIGURACIÓN DE VENDEDORES (Para el BOT)
+# CONFIGURACIÓN DE CELULARES Y VÍNCULOS ZONA-VENDEDOR
 # ==========================================
 ARCHIVO_VEND = "vendedores_config.json"
+ARCHIVO_VINCULOS = "vinculos_zonas.json"
 
 def cargar_mapa_vendedores():
     defaults = {
@@ -86,6 +87,27 @@ def guardar_mapa_vendedores(nuevo_mapa):
         return True
     except:
         return False
+
+def cargar_vinculos_zonas():
+    defaults = {"137": "03"} # Ejemplo de fábrica
+    if not os.path.exists(ARCHIVO_VINCULOS):
+        try:
+            with open(ARCHIVO_VINCULOS, 'w', encoding='utf-8') as f:
+                json.dump(defaults, f, indent=4)
+        except: pass
+        return defaults
+    else:
+        try:
+            with open(ARCHIVO_VINCULOS, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except: return defaults
+
+def guardar_vinculos_zonas(nuevo_mapa):
+    try:
+        with open(ARCHIVO_VINCULOS, 'w', encoding='utf-8') as f:
+            json.dump(nuevo_mapa, f, indent=4)
+        return True
+    except: return False
 
 # ==========================================
 # DICCIONARIO DE ZONAS
@@ -138,27 +160,56 @@ def extraer_zona_inteligente(texto_fila, zona_cruda):
     if zc and zc.lower() != 'nan': return zc
     return "Desconocida"
 
-def extraer_vendedor_inteligente(texto_crudo, vendedor_actual):
+def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
     v = str(vendedor_actual).strip().upper()
+    z = str(zona_o_cobrador).strip().upper()
+    texto_completo = (str(texto_crudo) + " " + v + " " + z).upper()
     
-    # 1. Buscamos formatos compuestos especiales (Ej: "302/1", "40/15")
-    match_compuesto = re.search(r'\b(\d+/\d+)\b', v)
+    # 0. MAPA DINÁMICO DE ZONAS (Si detecta una zona, la asocia al vendedor guardado en tu panel)
+    vinculos = cargar_vinculos_zonas()
+    match_zona = re.search(r'\b(1[0-5]\d|301)\b', texto_completo)
+    if match_zona:
+        num_zona = match_zona.group(1)
+        vend_asignado = str(vinculos.get(num_zona, "")).strip()
+        if vend_asignado and vend_asignado != "0":
+            return vend_asignado
+    
+    # 1. Buscamos nombres literales en la bolsa de texto por si quedaron escritos a mano
+    if re.search(r'\b(JORGE)\b', texto_completo): return "18"
+    if re.search(r'\b(ROBERTO)\b', texto_completo): return "05"
+    if re.search(r'\b(ALAN)\b', texto_completo): return "44"
+    if re.search(r'\b(LUCAS)\b', texto_completo): return "16"
+    if re.search(r'\b(NICOLAS|NICO)\b', texto_completo): return "40"
+    if re.search(r'\b(EZEQUIEL|EZE)\b', texto_completo): return "09"
+    if re.search(r'\b(LUIS)\b', texto_completo): return "03"
+    if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "1"
+    if re.search(r'\b(VALENTIN|VALENTÍN|CARLOS)\b', texto_completo): return "0"
+    
+    # 2. Análisis cruzado: si "Vendedor" está vacío o en 0, pero en "Cobrador/Zona" hay un número
+    candidatos = [v, z]
+    for dato in candidatos:
+        if dato == "18": return "18" 
+        if dato == "05" or dato == "5": return "05" 
+        if dato == "44" or dato == "04" or dato == "4": return "44" 
+        if dato == "16": return "16" 
+        if dato == "40" or dato == "15": return "40" 
+        if dato == "09" or dato == "9": return "09" 
+        if dato == "03" or dato == "3": return "03" 
+        if dato == "1": return "1" 
+        if dato == "302/1": return "302/1"
+        if dato == "40/15": return "40/15"
+
+    # 3. Si viene un código compuesto especial en el texto (Ej: "302/1", "40/15")
+    match_compuesto = re.search(r'\b(\d+/\d+)\b', texto_completo)
     if match_compuesto:
         return match_compuesto.group(1)
         
-    # 2. Si viene un código puro explícito ("0", "1", "44", etc.), lo respetamos
-    if re.match(r'^[\d]+$', v):
+    # 4. Si encontramos un número incrustado en el texto de la columna Vendedor (ignorar el 0 por default)
+    if re.match(r'^[\d]+$', v) and v != "0":
         return v
         
-    # 3. Si no hay código numérico en la columna, escaneamos la bolsa de texto por nombres
-    texto_completo = (str(texto_crudo) + " " + v).upper()
-    if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "1"
-    if re.search(r'\b(VALENTIN|VALENTÍN|CARLOS)\b', texto_completo): return "0"
-    if re.search(r'\b(LUIS)\b', texto_completo): return "18"
-    
-    # 4. Si encontramos un número incrustado en el texto de la columna (Ej: "Vend 44")
     match_num = re.search(r'\b(\d+)\b', v)
-    if match_num:
+    if match_num and match_num.group(1) != "0":
         return match_num.group(1)
         
     return "0"
@@ -169,19 +220,15 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual):
 def separar_telefonos(texto_crudo):
     if pd.isna(texto_crudo): return []
     texto = str(texto_crudo).strip()
-    
     texto = re.sub(r'\b\d{2}-\d{8}-\d{1}\b', '', texto)
     texto = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', texto)
-    
     partes = re.split(r'//|/|\*|_|cel:?|tel:?|móvil:?|movil:?|contacto:?|;|,|\|', texto, flags=re.IGNORECASE)
-    
     telefonos_limpios = []
     for parte in partes:
         num_puro = ''.join(filter(str.isdigit, parte))
         if num_puro.startswith("000"): continue
         if len(num_puro) >= 8 and len(num_puro) <= 15:
             telefonos_limpios.append(num_puro)
-            
     vistos = set()
     return [x for x in telefonos_limpios if not (x in vistos or vistos.add(x))]
 
@@ -189,19 +236,16 @@ def estandarizar_columnas(df):
     cols_str = [str(c).lower().strip() for c in df.columns]
     mapa = {}
     asignados = set() 
-    
     for original, minuscula in zip(df.columns, cols_str):
         nuevo_nombre = None
         if any(p in minuscula for p in ['vend', 'corredor', 'rep', 'agente']): nuevo_nombre = 'Vendedor'
-        elif any(p in minuscula for p in ['zona', 'locali', 'ciudad', 'ubic', 'direc']): nuevo_nombre = 'Zona_Cruda'
+        elif any(p in minuscula for p in ['zona', 'locali', 'ciudad', 'ubic', 'direc', 'cobr', 'cobrador']): nuevo_nombre = 'Zona_Cruda'
         elif any(p in minuscula for p in ['tel', 'cel', 'móvil', 'movil', 'contacto']): nuevo_nombre = 'Telefonos_Raw'
         elif any(p in minuscula for p in ['cód', 'cod', 'nro', 'código', 'id']): nuevo_nombre = 'Numero_Cliente'
         elif any(p in minuscula for p in ['nombre', 'cliente', 'razon', 'razón', 'social']): nuevo_nombre = 'Nombre'
-            
         if nuevo_nombre and nuevo_nombre not in asignados:
             mapa[original] = nuevo_nombre
             asignados.add(nuevo_nombre)
-            
     df = df.rename(columns=mapa)
     df = df.loc[:, ~df.columns.duplicated()].copy() 
     return df
@@ -219,7 +263,6 @@ def procesar_un_archivo(ruta):
         
         for df_temp in dfs_to_process:
             if df_temp.empty: continue
-            
             best_row = -1
             max_score = 0
             
@@ -227,7 +270,6 @@ def procesar_un_archivo(ruta):
                 row_str = " ".join(row.fillna("").astype(str)).lower()
                 if "-zzzz" in row_str or "-999" in row_str or "z.fiscal" in row_str or "ordenado por" in row_str:
                     continue
-                    
                 score = 0
                 non_empty_cols = 0
                 for cell in row.fillna("").astype(str):
@@ -237,7 +279,7 @@ def procesar_un_archivo(ruta):
                         if c_low in ['nombre', 'cliente', 'razon social', 'razón social', 'clientes']: score += 10
                         if c_low in ['cód.', 'cod.', 'cod', 'código', 'codigo', 'id', 'nro', 'cód']: score += 5
                         if c_low in ['teléfonos', 'telefono', 'tel', 'cel', 'celular', 'movil', 'contacto']: score += 5
-                        if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio']: score += 3
+                        if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio', 'cobrador', 'cobr.']: score += 3
                 
                 final_score = score * (1 if non_empty_cols > 2 else 0)
                 if final_score > max_score:
@@ -272,14 +314,11 @@ def procesar_un_archivo(ruta):
                 df_temp[col] = df_temp[col].fillna("")
                 
             text_agg = df_temp.groupby('Numero_Cliente')['Row_String'].apply(lambda x: ' | '.join(x.astype(str))).reset_index()
-            
             df_agrupado = df_temp.drop_duplicates(subset=['Numero_Cliente']).copy()
             df_agrupado = df_agrupado.drop(columns=['Row_String']).merge(text_agg, on='Numero_Cliente', how='left')
             df_agrupado_total.append(df_agrupado)
             
-        if not df_agrupado_total:
-            return pd.DataFrame(), 0
-            
+        if not df_agrupado_total: return pd.DataFrame(), 0
         df_final_archivo = pd.concat(df_agrupado_total, ignore_index=True)
         return df_final_archivo, total_filas
         
@@ -290,19 +329,16 @@ def procesar_un_archivo(ruta):
 def procesar_cruce(df_maestro, progress_callback=None):
     try:
         if progress_callback: progress_callback(5, "Estandarizando memoria en bloque...")
-        
         df = df_maestro.copy()
         df['Clave_Agrupacion'] = df['Numero_Cliente'].replace("", np.nan)
         df['Clave_Agrupacion'] = np.where(df['Clave_Agrupacion'].isna(), df['Nombre'].astype(str) + "_" + df.index.astype(str), df['Clave_Agrupacion'])
         
         if progress_callback: progress_callback(15, "Agrupando clientes duplicados en alta velocidad...")
-        
         for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
             df[col] = df[col].replace([r'^\s*$', 'nan', 'None'], np.nan, regex=True)
             df[col] = df.groupby('Clave_Agrupacion')[col].transform(lambda x: x.ffill().bfill()).fillna("")
             
         text_agg = df.groupby('Clave_Agrupacion')['Row_String'].apply(lambda x: ' | '.join(x.astype(str))).reset_index()
-        
         df_agrupado = df.drop_duplicates(subset=['Clave_Agrupacion']).copy()
         df_agrupado = df_agrupado.drop(columns=['Row_String']).merge(text_agg, on='Clave_Agrupacion', how='left')
         
@@ -318,13 +354,14 @@ def procesar_cruce(df_maestro, progress_callback=None):
             n = str(row['Nombre']).strip()
             c = str(row['Numero_Cliente']).strip()
             v = str(row['Vendedor']).strip()
+            zona_o_cobr = str(row.get('Zona_Cruda', '')).strip()
             texto_total = str(row['Row_String'])
             
             telefonos_encontrados = separar_telefonos(texto_total)
-            zona_enriquecida = extraer_zona_inteligente(texto_total, row.get('Zona_Cruda', ''))
+            zona_enriquecida = extraer_zona_inteligente(texto_total, zona_o_cobr)
             
-            # --- Devolvemos el CODIGO literal del Vendedor ("0", "40/15", "302") ---
-            vend_f = extraer_vendedor_inteligente(texto_total, v)
+            # --- ACÁ BUSCAMOS EL VENDEDOR ---
+            vend_f = extraer_vendedor_inteligente(texto_total, v, zona_o_cobr)
             
             if n == "" and c.startswith("SinID_") and len(telefonos_encontrados) == 0: continue
             if "cód." in n.lower() or "fecha:" in n.lower() or "hoja:" in n.lower() or "wood tools" in n.lower(): continue

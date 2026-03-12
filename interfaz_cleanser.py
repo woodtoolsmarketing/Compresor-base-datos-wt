@@ -56,10 +56,13 @@ class DataCleanserApp:
         frame_botones.pack(fill="x")
         
         tk.Button(frame_botones, text="📂 1. Cargar Archivo", command=self.cargar_archivo_individual, bg="#4CAF50", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_botones, text="📁 1. Rastrear Carpeta (Filtro Auto)", command=self.cargar_carpeta_windows, bg="#FF9800", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_botones, text="🧹 2. Cruzar Datos y Eliminar Duplicados", command=self.iniciar_cruce_fondo, bg="#2196F3", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=30)
+        tk.Button(frame_botones, text="📁 1. Rastrear Carpeta", command=self.cargar_carpeta_windows, bg="#FF9800", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame_botones, text="🧹 2. Forzar Cruce Manual", command=self.iniciar_cruce_fondo, bg="#2196F3", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=30)
         
         tk.Button(frame_botones, text="📥 3. EXPORTAR BASE FINAL", command=self.exportar_excel, bg="#E91E63", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=5)
+        
+        # --- NUEVO BOTON PARA VINCULAR ZONAS ---
+        tk.Button(frame_botones, text="🗺️ Vincular Zonas", command=self.abrir_config_zonas, bg="#9C27B0", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=5)
         tk.Button(frame_botones, text="⚙️ Configurar Celulares", command=self.abrir_config_vendedores, bg="#607D8B", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=10)
 
         self.notebook = ttk.Notebook(root)
@@ -69,7 +72,7 @@ class DataCleanserApp:
         self.notebook.add(self.tab_cola, text="⏳ Cola de Archivos")
         
         self.tab_datos = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_datos, text="📊 Base de Datos en Memoria")
+        self.notebook.add(self.tab_datos, text="📊 Base de Datos Procesada")
         
         self.tab_historial = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_historial, text="🕒 Historial de Cargas")
@@ -128,63 +131,55 @@ class DataCleanserApp:
         self.actualizar_tabla_historial()
 
     # ==========================================
-    # EDICIÓN INDIVIDUAL DE UN CLIENTE
+    # MENU DE CONFIGURACIÓN DE ZONAS (NUEVO)
     # ==========================================
-    def editar_cliente_ui(self):
-        if self.df_final.empty:
-            return messagebox.showwarning("Atención", "Primero debes presionar 'Cruzar Datos' (Paso 2) para poder editar a los clientes finales.")
-            
-        seleccion = self.tree.selection()
-        if not seleccion:
-            return messagebox.showwarning("Atención", "Hacé clic en un cliente de la tabla para seleccionarlo y luego presioná Editar.")
-            
-        item_id = seleccion[0]
-        valores = self.tree.item(item_id, "values")
+    def abrir_config_zonas(self):
+        vent_conf = tk.Toplevel(self.root)
+        vent_conf.title("Vincular Zonas a Vendedores")
+        vent_conf.geometry("450x600")
+        vent_conf.transient(self.root)
+        vent_conf.grab_set()
+
+        tk.Label(vent_conf, text="Asigná qué vendedor maneja cada Zona", font=("Segoe UI", 12, "bold"), fg="#2b2b2b").pack(pady=10)
+        tk.Label(vent_conf, text="Ingresá el CÓDIGO del vendedor (ej: 18, 05, 44)", fg="gray").pack()
         
-        vent_edit = tk.Toplevel(self.root)
-        vent_edit.title("Editar Cliente Específico")
-        vent_edit.geometry("450x300")
-        vent_edit.transient(self.root)
-        vent_edit.grab_set()
+        frame_lista = tk.Frame(vent_conf)
+        frame_lista.pack(fill="both", expand=True, padx=10, pady=5)
         
-        tk.Label(vent_edit, text="Corregir datos del cliente:", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
+        canvas = tk.Canvas(frame_lista, borderwidth=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame_lista, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
-        campos = ["Nombre:", "Nro Cliente:", "Zona:", "Código Vendedor:", "Teléfonos:"]
-        entradas = []
+        vinculos = backend_cleanser.cargar_vinculos_zonas()
+        self.entradas_zonas = {}
         
-        for i, campo in enumerate(campos):
-            tk.Label(vent_edit, text=campo, font=("Arial", 10)).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
-            ent = tk.Entry(vent_edit, width=40)
-            ent.insert(0, str(valores[i]))
-            ent.grid(row=i+1, column=1, padx=10, pady=5)
-            entradas.append(ent)
+        tk.Label(scrollable_frame, text="Zona del País", font=("Arial", 9, "bold")).grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(scrollable_frame, text="Código Vendedor", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5, pady=5)
+        
+        for i, (num_zona, desc_zona) in enumerate(backend_cleanser.MAPA_ZONAS.items(), start=1):
+            tk.Label(scrollable_frame, text=f"{num_zona} - {desc_zona}").grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            ent = tk.Entry(scrollable_frame, width=15)
+            val_actual = vinculos.get(num_zona, "")
+            ent.insert(0, val_actual)
+            ent.grid(row=i, column=1, padx=5, pady=5)
+            self.entradas_zonas[num_zona] = ent
             
-        def guardar_edicion():
-            nuevos_val = [e.get().strip() for e in entradas]
-            self.tree.item(item_id, values=nuevos_val)
-            
-            nro_original = valores[1]
-            idx_list = self.df_final.index[self.df_final['Número de cliente'] == nro_original].tolist()
-            
-            if idx_list:
-                idx = idx_list[0]
-                self.df_final.at[idx, 'Nombre'] = nuevos_val[0]
-                self.df_final.at[idx, 'Número de cliente'] = nuevos_val[1]
-                self.df_final.at[idx, 'Zona del cliente'] = nuevos_val[2]
-                self.df_final.at[idx, 'Vendedor'] = nuevos_val[3] 
+        def guardar():
+            nuevo_mapa = {z: ent.get().strip() for z, ent in self.entradas_zonas.items() if ent.get().strip()}
+            if backend_cleanser.guardar_vinculos_zonas(nuevo_mapa):
+                messagebox.showinfo("Éxito", "Vínculos guardados.\nAhora el programa sabrá a quién le pertenece cada zona.", parent=vent_conf)
+                vent_conf.destroy()
+            else:
+                messagebox.showerror("Error", "No se pudo guardar la configuración.", parent=vent_conf)
                 
-                # Para que no te borre todos los números si cambiaste de vendedor
-                tels = [t.strip() for t in nuevos_val[4].split('|') if t.strip()]
-                self.df_final.at[idx, 'Primer número'] = tels[0] if len(tels) > 0 else ""
-                self.df_final.at[idx, 'Segundo número'] = tels[1] if len(tels) > 1 else ""
-                self.df_final.at[idx, 'Tercer número'] = tels[2] if len(tels) > 2 else ""
-                self.df_final.at[idx, 'Cuarto número'] = tels[3] if len(tels) > 3 else ""
-                self.df_final.at[idx, 'Quinto número'] = tels[4] if len(tels) > 4 else ""
-                
-            vent_edit.destroy()
-            messagebox.showinfo("Guardado", f"El cliente {nuevos_val[0]} fue actualizado con éxito.\nSe guardó con el código de vendedor: {nuevos_val[3]}.", parent=self.root)
-            
-        tk.Button(vent_edit, text="💾 Guardar Cambios", command=guardar_edicion, bg="#4CAF50", fg="white", font=("bold", 10)).grid(row=len(campos)+1, column=0, columnspan=2, pady=15)
+        tk.Button(vent_conf, text="💾 Guardar Vínculos", command=guardar, bg="#4CAF50", fg="white", font=("bold", 11)).pack(pady=10)
 
     # ==========================================
     # MENU DE CONFIGURACIÓN DE VENDEDORES (GENERAL)
@@ -236,6 +231,64 @@ class DataCleanserApp:
         tk.Button(vent_conf, text="💾 Guardar Directorio", command=guardar, bg="#4CAF50", fg="white", font=("bold", 11)).pack(pady=10)
 
     # ==========================================
+    # EDICIÓN INDIVIDUAL DE UN CLIENTE
+    # ==========================================
+    def editar_cliente_ui(self):
+        if self.df_final.empty:
+            return messagebox.showwarning("Atención", "Primero debes presionar 'Cruzar Datos' (Paso 2) para poder editar a los clientes finales.")
+            
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return messagebox.showwarning("Atención", "Hacé clic en un cliente de la tabla para seleccionarlo y luego presioná Editar.")
+            
+        item_id = seleccion[0]
+        valores = self.tree.item(item_id, "values")
+        
+        vent_edit = tk.Toplevel(self.root)
+        vent_edit.title("Editar Cliente Específico")
+        vent_edit.geometry("450x300")
+        vent_edit.transient(self.root)
+        vent_edit.grab_set()
+        
+        tk.Label(vent_edit, text="Corregir datos del cliente:", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
+        
+        campos = ["Nombre:", "Nro Cliente:", "Zona:", "Código Vendedor:", "Teléfonos:"]
+        entradas = []
+        
+        for i, campo in enumerate(campos):
+            tk.Label(vent_edit, text=campo, font=("Arial", 10)).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
+            ent = tk.Entry(vent_edit, width=40)
+            ent.insert(0, str(valores[i]))
+            ent.grid(row=i+1, column=1, padx=10, pady=5)
+            entradas.append(ent)
+            
+        def guardar_edicion():
+            nuevos_val = [e.get().strip() for e in entradas]
+            self.tree.item(item_id, values=nuevos_val)
+            
+            nro_original = valores[1]
+            idx_list = self.df_final.index[self.df_final['Número de cliente'] == nro_original].tolist()
+            
+            if idx_list:
+                idx = idx_list[0]
+                self.df_final.at[idx, 'Nombre'] = nuevos_val[0]
+                self.df_final.at[idx, 'Número de cliente'] = nuevos_val[1]
+                self.df_final.at[idx, 'Zona del cliente'] = nuevos_val[2]
+                self.df_final.at[idx, 'Vendedor'] = nuevos_val[3] 
+                
+                tels = [t.strip() for t in nuevos_val[4].split('|') if t.strip()]
+                self.df_final.at[idx, 'Primer número'] = tels[0] if len(tels) > 0 else ""
+                self.df_final.at[idx, 'Segundo número'] = tels[1] if len(tels) > 1 else ""
+                self.df_final.at[idx, 'Tercer número'] = tels[2] if len(tels) > 2 else ""
+                self.df_final.at[idx, 'Cuarto número'] = tels[3] if len(tels) > 3 else ""
+                self.df_final.at[idx, 'Quinto número'] = tels[4] if len(tels) > 4 else ""
+                
+            vent_edit.destroy()
+            messagebox.showinfo("Guardado", f"El cliente {nuevos_val[0]} fue actualizado con éxito.\nSe guardó con el código de vendedor: {nuevos_val[3]}.", parent=self.root)
+            
+        tk.Button(vent_edit, text="💾 Guardar Cambios", command=guardar_edicion, bg="#4CAF50", fg="white", font=("bold", 10)).grid(row=len(campos)+1, column=0, columnspan=2, pady=15)
+
+    # ==========================================
     # LÓGICA DE LA COLA
     # ==========================================
     def cargar_archivo_individual(self):
@@ -252,7 +305,7 @@ class DataCleanserApp:
         self.cola_rutas.append(carpeta)
         self.refrescar_listbox_cola()
         self.notebook.select(self.tab_cola)
-        self.lbl_estado_principal.config(text=f"Carpeta agendada. Se escaneará y filtrará al iniciar.", fg="green")
+        self.lbl_estado_principal.config(text=f"Carpeta agendada.", fg="green")
 
     def quitar_archivo_cola(self):
         seleccion = self.listbox_cola.curselection()
@@ -275,7 +328,7 @@ class DataCleanserApp:
             self.btn_iniciar.config(state="disabled")
 
     # ==========================================
-    # POPUP 1: LECTURA DE ARCHIVOS
+    # PROCESAMIENTO
     # ==========================================
     def abrir_popup_lectura(self):
         self.vent_progreso = tk.Toplevel(self.root)
@@ -333,7 +386,7 @@ class DataCleanserApp:
         if respuesta:
             self.cancelado = True
             self.pausado = False 
-            self.lbl_archivo_actual.config(text="Cancelando proceso, guardando memoria...", fg="red")
+            self.lbl_archivo_actual.config(text="Cancelando proceso...", fg="red")
             self.btn_pausa.config(state="disabled")
             self.btn_cancelar.config(state="disabled")
 
@@ -361,18 +414,13 @@ class DataCleanserApp:
                 messagebox.showerror("Error de Archivo", f"Se detuvo la lectura por un error crítico:\n\n{error_msg}")
             elif self.cancelado:
                 self.lbl_estado_principal.config(text="PROCESO CANCELADO.", fg="red")
-                if filas_procesadas > 0:
-                    messagebox.showinfo("Carga Detenida", f"Se guardaron {filas_procesadas} filas leídas exitosamente antes de cancelar.")
-            else:
-                self.notebook.select(self.tab_datos)
-                msg_final = f"Se leyeron {archivos_exitosos} archivos.\nTotal filas en memoria: {filas_procesadas}."
-                if archivos_corruptos > 0:
-                    msg_final += f"\n\n⚠️ ATENCIÓN: Se omitieron {archivos_corruptos} archivos por estar corruptos o tener formatos inválidos."
-                msg_final += "\n\n¡Presioná 'Cruzar Datos' para limpiarlos y extraer teléfonos!"
-                messagebox.showinfo("Lectura Terminada", msg_final)
+            
+            # --- AUTO-CRUCE: Acá está la magia para que cruce solo después de cargar ---
+            if not self.cancelado and not error_msg and not self.df_maestro.empty:
+                self.root.after(500, self.iniciar_cruce_fondo)
                 
         try:
-            self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Escaneando y filtrando carpetas...", fg="blue"))
+            self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Escaneando carpetas...", fg="blue"))
             rutas_expandidas = []
             PALABRAS_CLAVE = ['contacto', 'cliente', 'maestro', 'base', 'padron', 'datos', 'zona', 'giras', 'rutas']
             
@@ -391,7 +439,7 @@ class DataCleanserApp:
             self.root.after(0, self.refrescar_listbox_cola)
             
             if not self.cola_rutas:
-                self.root.after(0, lambda: messagebox.showinfo("Filtro", "No se encontraron archivos con palabras clave en su nombre.", parent=self.vent_progreso))
+                self.root.after(0, lambda: messagebox.showinfo("Filtro", "No se encontraron archivos válidos.", parent=self.vent_progreso))
                 self.cancelado = True
             
             df_acumulado = []
@@ -429,10 +477,8 @@ class DataCleanserApp:
             if df_acumulado:
                 self.root.after(0, lambda: self.var_progreso.set(99))
                 self.root.after(0, lambda: self.lbl_porcentaje.config(text="99%"))
-                self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Consolidando datos sin errores de índices...", fg="#E91E63", font=("Arial", 10, "bold")))
                 
                 df_nuevo = pd.concat(df_acumulado, ignore_index=True)
-                
                 if not self.df_maestro.empty:
                     self.df_maestro = pd.concat([self.df_maestro, df_nuevo], ignore_index=True)
                 else:
@@ -452,7 +498,7 @@ class DataCleanserApp:
     # ==========================================
     def abrir_popup_cruce(self):
         self.vent_cruce = tk.Toplevel(self.root)
-        self.vent_cruce.title("Cruce de Datos...")
+        self.vent_cruce.title("Cruce de Datos Automático...")
         self.vent_cruce.geometry("550x250")
         self.vent_cruce.resizable(False, False)
         self.vent_cruce.transient(self.root)
@@ -473,6 +519,7 @@ class DataCleanserApp:
         if self.df_maestro.empty:
             return messagebox.showwarning("Atención", "No hay datos en memoria para cruzar. Primero leé algún archivo.")
             
+        self.notebook.select(self.tab_datos)
         self.abrir_popup_cruce()
         threading.Thread(target=self._trabajador_cruce).start()
 
@@ -489,7 +536,7 @@ class DataCleanserApp:
                 if hasattr(self, 'vent_cruce') and self.vent_cruce.winfo_exists():
                     self.vent_cruce.destroy()
                 self.actualizar_tabla_datos(cruza_finalizada=True)
-                messagebox.showinfo("Cruce Finalizado", f"Se unificaron los datos perfectamente.\nBase optimizada: {len(self.df_final)} clientes únicos.")
+                messagebox.showinfo("Proceso Exitoso", f"Se limpió la base perfectamente.\n\nPara que la Inteligencia asigne automáticamente a los vendedores según su zona, asegurate de tenerlas vinculadas en el botón violeta de '🗺️ Vincular Zonas'.")
                 
             self.root.after(0, finalizar_exito)
             
@@ -534,7 +581,7 @@ class DataCleanserApp:
 
     def exportar_excel(self):
         if self.df_final.empty:
-            return messagebox.showerror("Error", "Primero debes presionar el botón azul de 'Cruzar Datos' para generar la base limpia.")
+            return messagebox.showerror("Error", "Primero debes esperar a que termine el 'Cruce de Datos' para generar la base limpia.")
             
         ruta_guardar = filedialog.asksaveasfilename(
             defaultextension=".xlsx",
