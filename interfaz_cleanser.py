@@ -292,7 +292,8 @@ class DataCleanserApp:
     # LÓGICA DE LA COLA
     # ==========================================
     def cargar_archivo_individual(self):
-        ruta = filedialog.askopenfilename(filetypes=[("Excel y CSV", "*.xlsx *.xls *.csv")])
+        # --- AHORA ACEPTAMOS MÁS FORMATOS UNIVERSALES ---
+        ruta = filedialog.askopenfilename(filetypes=[("Tablas de Datos", "*.xlsx *.xls *.csv *.xlsm *.xlsb *.ods *.txt *.tsv"), ("Todos los archivos", "*.*")])
         if ruta:
             self.cola_rutas.append(ruta)
             self.refrescar_listbox_cola()
@@ -429,7 +430,8 @@ class DataCleanserApp:
                     for raiz, directorios, archivos in os.walk(ruta):
                         for arch in archivos:
                             nombre_low = arch.lower()
-                            if arch.endswith(('.xlsx', '.xls', '.csv')) and not arch.startswith('~$'):
+                            # --- SE AMPLIÓ EL ESCÁNER DE CARPETAS ---
+                            if arch.endswith(('.xlsx', '.xls', '.csv', '.xlsm', '.xlsb', '.ods', '.txt', '.tsv')) and not arch.startswith('~$'):
                                 if any(palabra in nombre_low for palabra in PALABRAS_CLAVE):
                                     rutas_expandidas.append(os.path.join(raiz, arch))
                 else:

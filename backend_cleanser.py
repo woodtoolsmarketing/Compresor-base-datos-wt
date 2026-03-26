@@ -165,7 +165,6 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
     z = str(zona_o_cobrador).strip().upper()
     texto_completo = (str(texto_crudo) + " " + v + " " + z).upper()
     
-    # 0. MAPA DINÁMICO DE ZONAS (Si detecta una zona, la asocia al vendedor guardado en tu panel)
     vinculos = cargar_vinculos_zonas()
     match_zona = re.search(r'\b(1[0-5]\d|301)\b', texto_completo)
     if match_zona:
@@ -174,7 +173,6 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
         if vend_asignado and vend_asignado != "0":
             return vend_asignado
     
-    # 1. Buscamos nombres literales en la bolsa de texto por si quedaron escritos a mano
     if re.search(r'\b(JORGE)\b', texto_completo): return "18"
     if re.search(r'\b(ROBERTO)\b', texto_completo): return "05"
     if re.search(r'\b(ALAN)\b', texto_completo): return "44"
@@ -185,7 +183,6 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
     if re.search(r'\b(EMMANUEL|EMMA)\b', texto_completo): return "1"
     if re.search(r'\b(VALENTIN|VALENTÍN|CARLOS)\b', texto_completo): return "0"
     
-    # 2. Análisis cruzado: si "Vendedor" está vacío o en 0, pero en "Cobrador/Zona" hay un número
     candidatos = [v, z]
     for dato in candidatos:
         if dato == "18": return "18" 
@@ -199,12 +196,10 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
         if dato == "302/1": return "302/1"
         if dato == "40/15": return "40/15"
 
-    # 3. Si viene un código compuesto especial en el texto (Ej: "302/1", "40/15")
     match_compuesto = re.search(r'\b(\d+/\d+)\b', texto_completo)
     if match_compuesto:
         return match_compuesto.group(1)
         
-    # 4. Si encontramos un número incrustado en el texto de la columna Vendedor (ignorar el 0 por default)
     if re.match(r'^[\d]+$', v) and v != "0":
         return v
         
@@ -252,11 +247,45 @@ def estandarizar_columnas(df):
 
 def procesar_un_archivo(ruta):
     try:
-        if ruta.endswith('.csv'): 
-            dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None)]
-        else: 
-            xls = pd.ExcelFile(ruta)
-            dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+        ext = os.path.splitext(ruta)[1].lower()
+        dfs_to_process = []
+        
+        # --- MOTOR BLINDADO DE LECTURA UNIVERSAL ---
+        try:
+            if ext in ['.csv', '.txt', '.tsv']: 
+                try:
+                    dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None, encoding='utf-8', on_bad_lines='skip', sep=None, engine='python')]
+                except:
+                    dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')]
+            elif ext == '.xls':
+                try:
+                    xls = pd.ExcelFile(ruta, engine='xlrd')
+                    dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+                except:
+                    dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')]
+            elif ext in ['.xlsx', '.xlsm']: 
+                try:
+                    xls = pd.ExcelFile(ruta, engine='openpyxl')
+                    dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+                except:
+                    dfs_to_process = [pd.read_excel(ruta, dtype=str, header=None)]
+            elif ext == '.xlsb':
+                xls = pd.ExcelFile(ruta, engine='pyxlsb')
+                dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+            elif ext == '.ods':
+                xls = pd.ExcelFile(ruta, engine='odf')
+                dfs_to_process = [pd.read_excel(xls, sheet_name=s, dtype=str, header=None) for s in xls.sheet_names]
+            else:
+                try:
+                    dfs_to_process = [pd.read_excel(ruta, dtype=str, header=None)]
+                except:
+                    dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')]
+        except Exception as inner_e:
+            print(f"Error crítico abriendo archivo {ruta}: {inner_e}")
+            try:
+                dfs_to_process = [pd.read_csv(ruta, dtype=str, header=None, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')]
+            except:
+                return pd.DataFrame(), 0
             
         df_agrupado_total = []
         total_filas = 0
@@ -266,7 +295,7 @@ def procesar_un_archivo(ruta):
             best_row = -1
             max_score = 0
             
-            for idx, row in df_temp.head(25).iterrows():
+            for idx, row in df_temp.head(40).iterrows():
                 row_str = " ".join(row.fillna("").astype(str)).lower()
                 if "-zzzz" in row_str or "-999" in row_str or "z.fiscal" in row_str or "ordenado por" in row_str:
                     continue
@@ -277,11 +306,11 @@ def procesar_un_archivo(ruta):
                     if c_low:
                         non_empty_cols += 1
                         if c_low in ['nombre', 'cliente', 'razon social', 'razón social', 'clientes']: score += 10
-                        if c_low in ['cód.', 'cod.', 'cod', 'código', 'codigo', 'id', 'nro', 'cód']: score += 5
-                        if c_low in ['teléfonos', 'telefono', 'tel', 'cel', 'celular', 'movil', 'contacto']: score += 5
-                        if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio', 'cobrador', 'cobr.']: score += 3
+                        if c_low in ['cód.', 'cod.', 'cod', 'código', 'codigo', 'id', 'nro', 'cód', 'numero']: score += 5
+                        if c_low in ['teléfonos', 'telefono', 'tel', 'cel', 'celular', 'movil', 'móvil', 'contacto']: score += 5
+                        if c_low in ['vendedor', 'vend', 'zona', 'localidad', 'direc', 'domicilio', 'cobrador', 'cobr.', 'localización/zona']: score += 3
                 
-                final_score = score * (1 if non_empty_cols > 2 else 0)
+                final_score = score * (1 if non_empty_cols >= 2 else 0)
                 if final_score > max_score:
                     max_score = final_score
                     best_row = idx
@@ -360,15 +389,22 @@ def procesar_cruce(df_maestro, progress_callback=None):
             telefonos_encontrados = separar_telefonos(texto_total)
             zona_enriquecida = extraer_zona_inteligente(texto_total, zona_o_cobr)
             
-            # --- ACÁ BUSCAMOS EL VENDEDOR ---
             vend_f = extraer_vendedor_inteligente(texto_total, v, zona_o_cobr)
             
-            if n == "" and c.startswith("SinID_") and len(telefonos_encontrados) == 0: continue
-            if "cód." in n.lower() or "fecha:" in n.lower() or "hoja:" in n.lower() or "wood tools" in n.lower(): continue
-            if "clientes habilitados" in n.lower() or "ordenado por" in n.lower(): continue
+            # --- NUEVA REGLA ULTRA PERMISIVA ---
+            # Solo descartamos la fila si literal no tiene nombre ni teléfonos (fila 100% vacía)
+            n_low = n.lower()
+            if (n == "" or n_low == "nan" or n_low == "cliente sin nombre") and len(telefonos_encontrados) == 0: 
+                continue
+                
+            # Limpiamos basura del sistema de gestión (ERP)
+            if "fecha:" in n_low or "hoja:" in n_low or "wood tools" in n_low or "ordenado por" in n_low: 
+                continue
+            if "clientes habilitados" in n_low or "cód." in n_low: 
+                continue
             
             registro = {
-                'Nombre': n if n != "" else "Cliente Sin Nombre",
+                'Nombre': n if n not in ["", "nan"] else "Cliente Sin Nombre",
                 'Número de cliente': c if not c.startswith("SinID_") else "",
                 'Zona del cliente': zona_enriquecida,
                 'Vendedor': vend_f, 
