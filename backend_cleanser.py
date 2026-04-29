@@ -405,7 +405,7 @@ def procesar_cruce(df_maestro, progress_callback=None):
             
             registro = {
                 'Nombre': n if n not in ["", "nan"] else "Cliente Sin Nombre",
-                'Número de cliente': c if not c.startswith("SinID_") else "",
+                'Código de cliente': c if not c.startswith("SinID_") else "",
                 'Zona del cliente': zona_enriquecida,
                 'Vendedor': vend_f, 
                 'Primer número': telefonos_encontrados[0] if len(telefonos_encontrados) > 0 else "",

@@ -267,12 +267,12 @@ class DataCleanserApp:
             self.tree.item(item_id, values=nuevos_val)
             
             nro_original = valores[1]
-            idx_list = self.df_final.index[self.df_final['Número de cliente'] == nro_original].tolist()
+            idx_list = self.df_final.index[self.df_final['Código de cliente'] == nro_original].tolist()
             
             if idx_list:
                 idx = idx_list[0]
                 self.df_final.at[idx, 'Nombre'] = nuevos_val[0]
-                self.df_final.at[idx, 'Número de cliente'] = nuevos_val[1]
+                self.df_final.at[idx, 'Código de cliente'] = nuevos_val[1]
                 self.df_final.at[idx, 'Zona del cliente'] = nuevos_val[2]
                 self.df_final.at[idx, 'Vendedor'] = nuevos_val[3] 
                 
@@ -563,7 +563,7 @@ class DataCleanserApp:
             for _, row in self.df_final.iterrows():
                 if count >= LIMITE: break
                 tels_str = " | ".join([t for t in [row['Primer número'], row['Segundo número'], row['Tercer número']] if t])
-                self.tree.insert("", "end", values=(row['Nombre'], row['Número de cliente'], row['Zona del cliente'], row['Vendedor'], tels_str))
+                self.tree.insert("", "end", values=(row['Nombre'], row['Código de cliente'], row['Zona del cliente'], row['Vendedor'], tels_str))
                 count += 1
                 
             texto_extra = f" (Mostrando primeros {LIMITE})" if len(self.df_final) > LIMITE else ""
