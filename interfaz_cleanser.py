@@ -423,17 +423,14 @@ class DataCleanserApp:
         try:
             self.root.after(0, lambda: self.lbl_archivo_actual.config(text="Escaneando carpetas...", fg="blue"))
             rutas_expandidas = []
-            PALABRAS_CLAVE = ['contacto', 'cliente', 'maestro', 'base', 'padron', 'datos', 'zona', 'giras', 'rutas']
             
             for ruta in self.cola_rutas:
                 if os.path.isdir(ruta):
                     for raiz, directorios, archivos in os.walk(ruta):
                         for arch in archivos:
-                            nombre_low = arch.lower()
-                            # --- SE AMPLIÓ EL ESCÁNER DE CARPETAS ---
-                            if arch.endswith(('.xlsx', '.xls', '.csv', '.xlsm', '.xlsb', '.ods', '.txt', '.tsv')) and not arch.startswith('~$'):
-                                if any(palabra in nombre_low for palabra in PALABRAS_CLAVE):
-                                    rutas_expandidas.append(os.path.join(raiz, arch))
+                            # Se eliminó la validación de PALABRAS_CLAVE para procesar todos los archivos válidos
+                            if arch.lower().endswith(('.xlsx', '.xls', '.csv', '.xlsm', '.xlsb', '.ods', '.txt', '.tsv', '.vcf')) and not arch.startswith('~$'):
+                                rutas_expandidas.append(os.path.join(raiz, arch))
                 else:
                     rutas_expandidas.append(ruta)
                     
