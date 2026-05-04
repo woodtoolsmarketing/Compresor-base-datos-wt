@@ -215,15 +215,39 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador):
 def separar_telefonos(texto_crudo):
     if pd.isna(texto_crudo): return []
     texto = str(texto_crudo).strip()
-    texto = re.sub(r'\b\d{2}-\d{8}-\d{1}\b', '', texto)
-    texto = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', '', texto)
-    partes = re.split(r'//|/|\*|_|cel:?|tel:?|móvil:?|movil:?|contacto:?|;|,|\|', texto, flags=re.IGNORECASE)
+    
+    # 1. Eliminar CUITs y Fechas típicas para evitar falsos positivos
+    texto = re.sub(r'\b\d{2}-\d{8}-\d{1}\b', ' ', texto)
+    texto = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', ' ', texto)
+    
+    # 2. Reemplazar letras y símbolos "duros" (como /, \, |, *, _, comas) por un delimitador único "|"
+    # Mantenemos los números, espacios, guiones (-) y puntos (.) que suelen usarse dentro de un mismo número.
+    texto_separado = re.sub(r'[^\d\s\-\.]', '|', texto)
+    
     telefonos_limpios = []
-    for parte in partes:
-        num_puro = ''.join(filter(str.isdigit, parte))
-        if num_puro.startswith("000"): continue
-        if len(num_puro) >= 8 and len(num_puro) <= 15:
+    
+    # 3. Analizar cada bloque separado por nuestro delimitador "|"
+    for bloque in texto_separado.split('|'):
+        num_puro = ''.join(filter(str.isdigit, bloque))
+        
+        if num_puro.startswith("000") or num_puro == "": 
+            continue
+            
+        # Si el bloque ya tiene la longitud ideal de un celular, lo guardamos directo
+        if 8 <= len(num_puro) <= 15:
             telefonos_limpios.append(num_puro)
+            
+        # Si tiene MÁS de 15 dígitos, es probable que haya dos o más teléfonos distintos pegados 
+        # por guiones, puntos o espacios (ej: "1145678901 - 1145678902" o "1145678901-1145678902")
+        elif len(num_puro) > 15:
+            # Sub-dividimos este bloque largo aislando los guiones, puntos o espacios
+            sub_bloques = re.split(r'[\s\-\.]+', bloque.strip())
+            for sub in sub_bloques:
+                sub_puro = ''.join(filter(str.isdigit, sub))
+                if 8 <= len(sub_puro) <= 15 and not sub_puro.startswith("000"):
+                    telefonos_limpios.append(sub_puro)
+
+    # 4. Retornar la lista eliminando duplicados pero manteniendo el orden de aparición
     vistos = set()
     return [x for x in telefonos_limpios if not (x in vistos or vistos.add(x))]
 
