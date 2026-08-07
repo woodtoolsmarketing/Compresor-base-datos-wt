@@ -57,7 +57,10 @@ class DataCleanserApp:
         
         tk.Button(frame_botones, text="📂 1. Cargar Archivo", command=self.cargar_archivo_individual, bg="#4CAF50", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
         tk.Button(frame_botones, text="📁 1. Rastrear Carpeta", command=self.cargar_carpeta_windows, bg="#FF9800", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
-        tk.Button(frame_botones, text="🧹 2. Forzar Cruce Manual", command=self.iniciar_cruce_fondo, bg="#2196F3", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=30)
+        tk.Button(frame_botones, text="🧹 2. Forzar Cruce Manual", command=self.iniciar_cruce_fondo, bg="#2196F3", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=20)
+
+        # --- Actualiza SOLO las ubicaciones de un Excel ya armado, sin tocar su formato ---
+        tk.Button(frame_botones, text="📍 Actualizar Ubicaciones", command=self.abrir_actualizador_ubicaciones, bg="#795548", fg="white", font=("bold", 10)).pack(side=tk.LEFT, padx=5)
         
         tk.Button(frame_botones, text="📥 3. EXPORTAR BASE FINAL", command=self.exportar_excel, bg="#E91E63", fg="white", font=("bold", 10)).pack(side=tk.RIGHT, padx=5)
         
@@ -133,19 +136,23 @@ class DataCleanserApp:
     # ==========================================
     # MENU DE CONFIGURACIÓN DE ZONAS (NUEVO)
     # ==========================================
+    def _opciones_vendedor(self):
+        """['0 - VALENTIN / CARLOS', '44 - ALAN', ...] para los desplegables."""
+        return [f"{cod} - {info['nombre']}" for cod, info in backend_cleanser.VENDEDORES_CATALOGO.items()]
+
     def abrir_config_zonas(self):
         vent_conf = tk.Toplevel(self.root)
         vent_conf.title("Vincular Zonas a Vendedores")
-        vent_conf.geometry("450x600")
+        vent_conf.geometry("780x650")
         vent_conf.transient(self.root)
         vent_conf.grab_set()
 
         tk.Label(vent_conf, text="Asigná qué vendedor maneja cada Zona", font=("Segoe UI", 12, "bold"), fg="#2b2b2b").pack(pady=10)
-        tk.Label(vent_conf, text="Ingresá el CÓDIGO del vendedor (ej: 18, 05, 44)", fg="gray").pack()
-        
+        tk.Label(vent_conf, text="Elegí el vendedor de la lista. Dejalo en '0' si la zona todavía no tiene dueño.", fg="gray").pack()
+
         frame_lista = tk.Frame(vent_conf)
         frame_lista.pack(fill="both", expand=True, padx=10, pady=5)
-        
+
         canvas = tk.Canvas(frame_lista, borderwidth=0, highlightthickness=0)
         scrollbar = ttk.Scrollbar(frame_lista, orient="vertical", command=canvas.yview)
         scrollable_frame = tk.Frame(canvas)
@@ -153,33 +160,42 @@ class DataCleanserApp:
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        
+
         vinculos = backend_cleanser.cargar_vinculos_zonas()
+        opciones = self._opciones_vendedor()
         self.entradas_zonas = {}
-        
+
         tk.Label(scrollable_frame, text="Zona del País", font=("Arial", 9, "bold")).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        tk.Label(scrollable_frame, text="Código Vendedor", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5, pady=5)
-        
-        for i, (num_zona, desc_zona) in enumerate(backend_cleanser.MAPA_ZONAS.items(), start=1):
-            tk.Label(scrollable_frame, text=f"{num_zona} - {desc_zona}").grid(row=i, column=0, padx=5, pady=5, sticky="w")
-            ent = tk.Entry(scrollable_frame, width=15)
-            val_actual = vinculos.get(num_zona, "")
-            ent.insert(0, val_actual)
-            ent.grid(row=i, column=1, padx=5, pady=5)
-            self.entradas_zonas[num_zona] = ent
-            
+        tk.Label(scrollable_frame, text="Vendedor a cargo", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5, pady=5)
+
+        for i, (num_zona, nombre_zona, detalle) in enumerate(backend_cleanser.listar_zonas_para_ui(), start=1):
+            celda_zona = tk.Frame(scrollable_frame)
+            celda_zona.grid(row=i, column=0, padx=5, pady=4, sticky="w")
+            tk.Label(celda_zona, text=f"{num_zona} - {nombre_zona}", font=("Arial", 9, "bold"), anchor="w").pack(anchor="w")
+            resumen = detalle if len(detalle) <= 85 else detalle[:85] + "..."
+            tk.Label(celda_zona, text=resumen, fg="gray", font=("Arial", 8), anchor="w", justify="left").pack(anchor="w")
+
+            combo = ttk.Combobox(scrollable_frame, values=opciones, width=22, state="readonly")
+            actual = str(vinculos.get(num_zona, backend_cleanser.CODIGO_SIN_ASIGNAR))
+            combo.set(next((o for o in opciones if o.startswith(actual + " -")), opciones[0]))
+            combo.grid(row=i, column=1, padx=5, pady=4, sticky="n")
+            self.entradas_zonas[num_zona] = combo
+
         def guardar():
-            nuevo_mapa = {z: ent.get().strip() for z, ent in self.entradas_zonas.items() if ent.get().strip()}
+            nuevo_mapa = {z: cb.get().split(" - ")[0].strip() for z, cb in self.entradas_zonas.items()}
             if backend_cleanser.guardar_vinculos_zonas(nuevo_mapa):
                 messagebox.showinfo("Éxito", "Vínculos guardados.\nAhora el programa sabrá a quién le pertenece cada zona.", parent=vent_conf)
+                canvas.unbind_all("<MouseWheel>")
                 vent_conf.destroy()
             else:
                 messagebox.showerror("Error", "No se pudo guardar la configuración.", parent=vent_conf)
-                
+
         tk.Button(vent_conf, text="💾 Guardar Vínculos", command=guardar, bg="#4CAF50", fg="white", font=("bold", 11)).pack(pady=10)
+        vent_conf.protocol("WM_DELETE_WINDOW", lambda: (canvas.unbind_all("<MouseWheel>"), vent_conf.destroy()))
 
     # ==========================================
     # MENU DE CONFIGURACIÓN DE VENDEDORES (GENERAL)
@@ -209,12 +225,16 @@ class DataCleanserApp:
         
         mapa = backend_cleanser.cargar_mapa_vendedores()
         self.entradas_vend = {}
-        
+
         tk.Label(scrollable_frame, text="Código Exportado", font=("Arial", 9, "bold")).grid(row=0, column=0, padx=5, pady=5)
         tk.Label(scrollable_frame, text="Celular Real", font=("Arial", 9, "bold")).grid(row=0, column=1, padx=5, pady=5)
-        
+
         for i, (cod, tel) in enumerate(mapa.items(), start=1):
-            tk.Label(scrollable_frame, text=f"Código [{cod}]:").grid(row=i, column=0, padx=5, pady=5, sticky="e")
+            # Mostramos a quién pertenece cada código para no confundirse entre alias (04 = 44 = ALAN)
+            canon = backend_cleanser.normalizar_codigo_vendedor(cod)
+            quien = backend_cleanser.VENDEDORES_CATALOGO.get(canon, {}).get("nombre", "")
+            etiqueta = f"Código [{cod}]:" + (f"  {quien}" if quien else "")
+            tk.Label(scrollable_frame, text=etiqueta).grid(row=i, column=0, padx=5, pady=5, sticky="e")
             ent = tk.Entry(scrollable_frame, width=25)
             ent.insert(0, str(tel))
             ent.grid(row=i, column=1, padx=5, pady=5)
@@ -229,6 +249,201 @@ class DataCleanserApp:
                 messagebox.showerror("Error", "No se pudo guardar la configuración.", parent=vent_conf)
                 
         tk.Button(vent_conf, text="💾 Guardar Directorio", command=guardar, bg="#4CAF50", fg="white", font=("bold", 11)).pack(pady=10)
+
+    # ==========================================
+    # ACTUALIZADOR DE UBICACIONES (NO TOCA EL FORMATO DEL EXCEL)
+    # ==========================================
+    def abrir_actualizador_ubicaciones(self):
+        ruta = filedialog.askopenfilename(
+            title="Elegí el Excel al que querés corregirle SÓLO las ubicaciones",
+            filetypes=[("Excel con formato", "*.xlsx *.xlsm"), ("Todos los archivos", "*.*")])
+        if not ruta: return
+
+        try:
+            info_hojas = backend_cleanser.analizar_excel_para_ubicaciones(ruta)
+        except Exception as e:
+            return messagebox.showerror("No se pudo leer el archivo",
+                                        f"El archivo tiene que ser .xlsx o .xlsm (no .xls ni .csv).\n\nDetalle:\n{e}")
+
+        vent = tk.Toplevel(self.root)
+        vent.title("Actualizar Ubicaciones")
+        vent.geometry("820x640")
+        vent.transient(self.root)
+        vent.grab_set()
+
+        tk.Label(vent, text="📍 Actualizar SÓLO las ubicaciones", font=("Segoe UI", 13, "bold"), fg="#2b2b2b").pack(pady=(12, 2))
+        tk.Label(vent, text="Se reescriben únicamente las celdas de ubicación. Colores, negritas, bordes, anchos,\n"
+                            "fórmulas, filtros y el resto de las columnas quedan exactamente igual.",
+                 fg="gray", justify="center").pack()
+        tk.Label(vent, text=os.path.basename(ruta), font=("Arial", 9, "bold"), fg="#795548").pack(pady=(6, 8))
+
+        frame_hojas = tk.LabelFrame(vent, text=" ¿En qué columna escribo la ubicación? ", padx=10, pady=8)
+        frame_hojas.pack(fill="both", expand=True, padx=15)
+
+        canvas = tk.Canvas(frame_hojas, borderwidth=0, highlightthickness=0, height=210)
+        sb = ttk.Scrollbar(frame_hojas, orient="vertical", command=canvas.yview)
+        cont = tk.Frame(canvas)
+        cont.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=cont, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        OPCION_OMITIR = "🚫 No tocar esta hoja"
+        OPCION_NUEVA = "➕ Crear una columna nueva al final"
+        combos_hoja = {}
+
+        for h in info_hojas:
+            if not h["columnas"]:
+                continue
+
+            marco = tk.LabelFrame(cont, text=f" Hoja: {h['hoja']} ", padx=8, pady=6)
+            marco.pack(fill="x", expand=True, padx=4, pady=4)
+
+            # Fila de títulos: se detecta sola, pero siempre se puede corregir a mano.
+            tk.Label(marco, text="Los títulos están en la fila:").grid(row=0, column=0, sticky="e", padx=4, pady=2)
+            spin = tk.Spinbox(marco, from_=0, to=200, width=5)
+            spin.delete(0, tk.END)
+            spin.insert(0, str(h["fila_encabezado"] or 0))
+            spin.grid(row=0, column=1, sticky="w", padx=4)
+            tk.Label(marco, text="(0 = la hoja no tiene títulos, los datos empiezan en la fila 1)",
+                     fg="gray", font=("Arial", 8)).grid(row=0, column=2, sticky="w", padx=4)
+
+            # Todas las columnas, con una muestra de lo que hay adentro para reconocerlas de un vistazo
+            opciones = [OPCION_OMITIR, OPCION_NUEVA]
+            for col in h["columnas"]:
+                etiqueta = f"{col['letra']}"
+                if col["titulo"]: etiqueta += f" - {col['titulo']}"
+                if col["muestra"]: etiqueta += f"   ({col['muestra']})"
+                opciones.append(etiqueta)
+
+            tk.Label(marco, text="Escribir la ubicación en:").grid(row=1, column=0, sticky="e", padx=4, pady=2)
+            cb = ttk.Combobox(marco, values=opciones, width=58, state="readonly")
+            cb.set(opciones[2 + h["col_zona"]] if h["col_zona"] is not None else OPCION_NUEVA)
+            cb.grid(row=1, column=1, columnspan=2, sticky="w", padx=4)
+
+            aviso = f"{h['filas_totales']} filas · {h['columnas_totales']} columnas"
+            if h["fila_encabezado"] is None:
+                aviso += "  ⚠ no se detectaron títulos: revisá la fila y la columna de arriba"
+            tk.Label(marco, text=aviso, fg="gray", font=("Arial", 8)).grid(row=2, column=0, columnspan=3, sticky="w", padx=4)
+
+            combos_hoja[h["hoja"]] = (cb, spin, h, opciones)
+
+        frame_op = tk.LabelFrame(vent, text=" Opciones ", padx=10, pady=8)
+        frame_op.pack(fill="x", padx=15, pady=10)
+
+        tk.Label(frame_op, text="Por defecto se PISAN todas las ubicaciones con la versión nueva y corregida.",
+                 fg="#795548", font=("Arial", 9, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        tk.Label(frame_op, text="Cómo escribo la ubicación:").grid(row=1, column=0, sticky="w", pady=3)
+        combo_formato = ttk.Combobox(frame_op, width=38, state="readonly",
+                                     values=list(backend_cleanser.FORMATOS_UBICACION.values()))
+        combo_formato.current(0)
+        combo_formato.grid(row=1, column=1, sticky="w", padx=5)
+
+        var_vacias = tk.BooleanVar(value=False)
+        var_vend = tk.BooleanVar(value=False)
+        var_copia = tk.BooleanVar(value=True)
+        tk.Checkbutton(frame_op, text="NO pisar las ya cargadas: completar solamente las ubicaciones vacías",
+                       variable=var_vacias).grid(row=2, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(frame_op, text="Actualizar también la columna Vendedor (sólo donde se lo pueda identificar)",
+                       variable=var_vend).grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Checkbutton(frame_op, text="Guardar en una copia nueva y no tocar el archivo original (recomendado)",
+                       variable=var_copia).grid(row=4, column=0, columnspan=2, sticky="w")
+
+        def ejecutar():
+            plan = {}
+            for nombre_hoja, (cb, spin, h, opciones) in combos_hoja.items():
+                elegido = cb.get()
+                if elegido == OPCION_OMITIR: continue
+                col = "NUEVA" if elegido == OPCION_NUEVA else opciones.index(elegido) - 2
+                try:
+                    fila_enc = max(0, int(spin.get()))
+                except ValueError:
+                    fila_enc = h["fila_encabezado"] or 0
+                plan[nombre_hoja] = {"fila_encabezado": fila_enc, "col_zona": col,
+                                     "col_vendedor": h["col_vendedor"], "col_nombre": h["col_nombre"]}
+            if not plan:
+                return messagebox.showwarning("Atención", "No seleccionaste ninguna hoja para actualizar.", parent=vent)
+
+            formato = list(backend_cleanser.FORMATOS_UBICACION.keys())[combo_formato.current()]
+
+            if var_copia.get():
+                destino = None
+            else:
+                if not messagebox.askyesno("Confirmar", "Vas a MODIFICAR el archivo original.\n\n"
+                                                        f"{ruta}\n\n¿Seguro? (no se puede deshacer)", parent=vent):
+                    return
+                destino = ruta
+
+            vent.destroy()
+            self._lanzar_actualizacion_ubicaciones(ruta, destino, plan, formato,
+                                                   var_vacias.get(), var_vend.get())
+
+        frame_btn = tk.Frame(vent)
+        frame_btn.pack(pady=10)
+        tk.Button(frame_btn, text="✅ Actualizar Ubicaciones", command=ejecutar, bg="#4CAF50", fg="white",
+                  font=("Segoe UI", 11, "bold"), width=25).pack(side="left", padx=8)
+        tk.Button(frame_btn, text="Cancelar", command=vent.destroy, bg="#9E9E9E", fg="white",
+                  font=("bold", 10), width=12).pack(side="left", padx=8)
+
+    def _lanzar_actualizacion_ubicaciones(self, ruta, destino, plan, formato, solo_vacias, actualizar_vend):
+        self.vent_ubic = tk.Toplevel(self.root)
+        self.vent_ubic.title("Actualizando ubicaciones...")
+        self.vent_ubic.geometry("550x230")
+        self.vent_ubic.resizable(False, False)
+        self.vent_ubic.transient(self.root)
+        self.vent_ubic.grab_set()
+        self.vent_ubic.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        tk.Label(self.vent_ubic, text="Corrigiendo las ubicaciones...", font=("Segoe UI", 12, "bold"), fg="#795548").pack(pady=12)
+        self.lbl_pct_ubic = tk.Label(self.vent_ubic, text="0%", font=("Segoe UI", 26, "bold"), fg="#FF9800")
+        self.lbl_pct_ubic.pack()
+        self.var_ubic = tk.DoubleVar()
+        ttk.Progressbar(self.vent_ubic, variable=self.var_ubic, maximum=100, length=450).pack(pady=8)
+        self.lbl_estado_ubic = tk.Label(self.vent_ubic, text="Abriendo el archivo...", font=("Arial", 9), fg="gray")
+        self.lbl_estado_ubic.pack(pady=5)
+
+        threading.Thread(target=self._trabajador_ubicaciones,
+                         args=(ruta, destino, plan, formato, solo_vacias, actualizar_vend), daemon=True).start()
+
+    def _trabajador_ubicaciones(self, ruta, destino, plan, formato, solo_vacias, actualizar_vend):
+        def progreso(p, m):
+            self.root.after(0, lambda: self.var_ubic.set(p))
+            self.root.after(0, lambda: self.lbl_pct_ubic.config(text=f"{p}%"))
+            self.root.after(0, lambda: self.lbl_estado_ubic.config(text=m, fg="blue"))
+
+        try:
+            rep = backend_cleanser.actualizar_ubicaciones_excel(
+                ruta, destino, plan=plan, formato=formato, solo_vacias=solo_vacias,
+                actualizar_vendedor=actualizar_vend, progress_callback=progreso)
+
+            def ok():
+                if hasattr(self, 'vent_ubic') and self.vent_ubic.winfo_exists(): self.vent_ubic.destroy()
+                detalle = "\n".join(f"   • {h['hoja']}: {h['actualizadas']} corregidas" for h in rep["hojas"])
+                extra = ""
+                if rep["omitidas_formula"]: extra += f"\n🔒 {rep['omitidas_formula']} celdas con fórmula: no se tocaron."
+                if rep["omitidas_combinada"]: extra += f"\n🔒 {rep['omitidas_combinada']} celdas combinadas: no se tocaron."
+                if actualizar_vend: extra += f"\n👤 {rep['vendedores_actualizados']} vendedores actualizados."
+                messagebox.showinfo(
+                    "Ubicaciones actualizadas",
+                    f"✅ {rep['actualizadas']} ubicaciones corregidas.\n"
+                    f"➖ {rep['sin_cambios']} ya estaban bien.\n"
+                    f"❓ {rep['sin_ubicacion']} filas sin ubicación reconocible (se dejaron como estaban).\n\n"
+                    f"{detalle}{extra}\n\n"
+                    f"Archivo guardado en:\n{rep['ruta_destino']}\n\n"
+                    "El formato del Excel (colores, negritas, anchos, fórmulas) quedó intacto.")
+                self.lbl_estado_principal.config(text=f"Ubicaciones actualizadas: {rep['actualizadas']} celdas.", fg="green")
+                try: os.startfile(os.path.dirname(rep['ruta_destino']))
+                except Exception: pass
+
+            self.root.after(0, ok)
+
+        except Exception as e:
+            def err(msg=str(e)):
+                if hasattr(self, 'vent_ubic') and self.vent_ubic.winfo_exists(): self.vent_ubic.destroy()
+                messagebox.showerror("Error al actualizar", f"No se pudo actualizar el archivo:\n\n{msg}")
+            self.root.after(0, err)
 
     # ==========================================
     # EDICIÓN INDIVIDUAL DE UN CLIENTE
@@ -246,29 +461,50 @@ class DataCleanserApp:
         
         vent_edit = tk.Toplevel(self.root)
         vent_edit.title("Editar Cliente Específico")
-        vent_edit.geometry("450x300")
+        vent_edit.geometry("560x320")
         vent_edit.transient(self.root)
         vent_edit.grab_set()
-        
+
         tk.Label(vent_edit, text="Corregir datos del cliente:", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=2, pady=10)
-        
+
         campos = ["Nombre:", "Nro Cliente:", "Zona:", "Código Vendedor:", "Teléfonos:"]
         entradas = []
-        
+        opciones_zona = [f"{c} | {n}" for c, n, _ in backend_cleanser.listar_zonas_para_ui()]
+        opciones_vend = self._opciones_vendedor()
+
         for i, campo in enumerate(campos):
             tk.Label(vent_edit, text=campo, font=("Arial", 10)).grid(row=i+1, column=0, padx=10, pady=5, sticky="e")
-            ent = tk.Entry(vent_edit, width=40)
-            ent.insert(0, str(valores[i]))
+            if campo == "Zona:":
+                # Desplegable con el catálogo, pero se puede escribir a mano igual
+                ent = ttk.Combobox(vent_edit, width=38, values=opciones_zona)
+                ent.set(str(valores[i]))
+            elif campo == "Código Vendedor:":
+                # Sólo códigos válidos: así nunca se exporta un vendedor que el bot no conoce
+                ent = ttk.Combobox(vent_edit, width=38, values=opciones_vend, state="readonly")
+                actual = backend_cleanser.normalizar_codigo_vendedor(valores[i]) or backend_cleanser.CODIGO_SIN_ASIGNAR
+                ent.set(next((o for o in opciones_vend if o.startswith(actual + " -")), opciones_vend[0]))
+            else:
+                ent = tk.Entry(vent_edit, width=40)
+                ent.insert(0, str(valores[i]))
             ent.grid(row=i+1, column=1, padx=10, pady=5)
             entradas.append(ent)
-            
+
+
         def guardar_edicion():
             nuevos_val = [e.get().strip() for e in entradas]
+            # El desplegable devuelve "44 - ALAN": guardamos sólo el código.
+            nuevos_val[3] = nuevos_val[3].split(" - ")[0].strip()
             self.tree.item(item_id, values=nuevos_val)
-            
-            nro_original = valores[1]
-            idx_list = self.df_final.index[self.df_final['Código de cliente'] == nro_original].tolist()
-            
+
+            # La fila de la tabla se corresponde 1 a 1 con la fila del DataFrame.
+            # (Antes se buscaba por código de cliente y los clientes sin código se pisaban entre sí.)
+            posicion = self.tree.index(item_id)
+            if 0 <= posicion < len(self.df_final):
+                idx_list = [self.df_final.index[posicion]]
+            else:
+                nro_original = valores[1]
+                idx_list = self.df_final.index[self.df_final['Código de cliente'] == nro_original].tolist()
+
             if idx_list:
                 idx = idx_list[0]
                 self.df_final.at[idx, 'Nombre'] = nuevos_val[0]
