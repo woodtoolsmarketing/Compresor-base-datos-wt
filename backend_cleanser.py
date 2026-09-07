@@ -1273,7 +1273,13 @@ def procesar_un_archivo(ruta):
 
             if fila_enc:
                 df_temp.columns = df_temp.iloc[fila_enc - 1].fillna(pd.Series([f"Col_{i}" for i in range(len(df_temp.columns))])).astype(str)
-                df_temp = df_temp.iloc[fila_enc:].reset_index(drop=True)
+                # Encabezados de varias filas: saltar las filas de continuación de títulos
+                # (ej: 'nombre fantasía | contacto | teléfonos', 'Mail | datos de entrega')
+                primera_dato = fila_enc
+                while (primera_dato < len(df_temp) and primera_dato - fila_enc < 3
+                       and _es_fila_solo_titulos(list(df_temp.iloc[primera_dato]))):
+                    primera_dato += 1
+                df_temp = df_temp.iloc[primera_dato:].reset_index(drop=True)
             else:
                 df_temp.columns = [f"Col_{i}" for i in range(len(df_temp.columns))]
 
@@ -1455,6 +1461,25 @@ def _categoria_de_titulo(texto):
             if p in t:
                 return cat, pts
     return None, 0
+
+def _es_fila_solo_titulos(valores):
+    """True si la fila son sólo rótulos de encabezado (continuación de un header
+    de varias filas), sin ningún dato real. Evita que rótulos como 'nombre fantasía',
+    'Mail' o 'datos de entrega' entren como si fueran un cliente."""
+    llenas = []
+    for v in valores:
+        if v is None: continue
+        t = str(v).strip()
+        if t and t.lower() != "nan":
+            llenas.append(t)
+    if not llenas:
+        return False
+    # Si alguna celda tiene pinta de dato (teléfono, código largo, CUIT, importe), NO es encabezado.
+    for t in llenas:
+        if len(re.sub(r"\D", "", t)) >= 6:
+            return False
+    con_categoria = sum(1 for t in llenas if _categoria_de_titulo(t)[0])
+    return con_categoria >= max(1, (len(llenas) + 1) // 2)
 
 def detectar_fila_encabezado(filas):
     """Busca la fila de títulos de una planilla. Devuelve (fila_1based, puntaje).
