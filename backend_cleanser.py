@@ -619,6 +619,255 @@ def guardar_vinculos_zonas(nuevo_mapa):
     except: return False
 
 # ==========================================
+# ZONA POR TELÉFONO (característica / código de área)
+#
+# En Argentina característica + número local suman siempre 10 dígitos y la
+# característica identifica la localidad: 221 = La Plata, 2323 = Luján,
+# 351 = Córdoba... Dentro del 011 (AMBA) las líneas fijas 4xxx-xxxx se
+# ubican por la central (los 4 primeros dígitos del número local); los
+# celulares del 011 sólo dicen "AMBA".
+#
+# La tabla vive en caracteristicas_zonas.py. Si al lado del programa hay un
+# caracteristicas_zonas.json, sus entradas pisan/agregan a la tabla sin
+# recompilar. Formato:
+#   {"caracteristicas": {"2494": ["124"]}, "centrales_amba": {"4201": "102"}, "viejas": {"2322": "230"}}
+# ==========================================
+try:
+    import caracteristicas_zonas as _ct
+    CARACTERISTICAS = {str(k): dict(v) for k, v in _ct.CARACTERISTICAS.items()}
+    CENTRALES_AMBA = {str(k): str(v) for k, v in _ct.CENTRALES_AMBA.items()}
+    CARACTERISTICAS_VIEJAS = {str(k): str(v) for k, v in _ct.CARACTERISTICAS_VIEJAS.items()}
+    PREFIJOS_PROVINCIA = sorted(((str(p), list(z)) for p, z in _ct.PREFIJOS_PROVINCIA), key=lambda x: -len(x[0]))
+    ZONAS_AMBA = list(_ct.ZONAS_AMBA)
+except Exception:
+    CARACTERISTICAS, CENTRALES_AMBA, CARACTERISTICAS_VIEJAS, PREFIJOS_PROVINCIA = {}, {}, {}, []
+    ZONAS_AMBA = ["110", "101", "102", "104", "107"]
+
+ARCHIVO_CARACTERISTICAS = "caracteristicas_zonas.json"
+
+def cargar_caracteristicas_override():
+    """Ajustes locales sin recompilar (ver formato arriba). Devuelve cuántas entradas aplicó."""
+    if not os.path.exists(ARCHIVO_CARACTERISTICAS): return 0
+    try:
+        with open(ARCHIVO_CARACTERISTICAS, 'r', encoding='utf-8') as f:
+            extra = json.load(f)
+    except Exception:
+        return 0
+    n = 0
+    for area, zonas in (extra.get("caracteristicas") or {}).items():
+        area = re.sub(r'\D', '', str(area)).lstrip('0')
+        if isinstance(zonas, str): zonas = [zonas]
+        zonas = [str(z).strip() for z in (zonas or []) if str(z).strip()]
+        if area and zonas:
+            previa = CARACTERISTICAS.get(area, {})
+            CARACTERISTICAS[area] = {**previa, "zonas": zonas, "cabecera": previa.get("cabecera", "ajuste manual")}
+            n += 1
+    for central, zona in (extra.get("centrales_amba") or {}).items():
+        c = re.sub(r'\D', '', str(central))
+        if len(c) == 4 and str(zona).strip():
+            CENTRALES_AMBA[c] = str(zona).strip(); n += 1
+    for viejo, nuevo in (extra.get("viejas") or {}).items():
+        v = re.sub(r'\D', '', str(viejo)).lstrip('0'); nv = re.sub(r'\D', '', str(nuevo)).lstrip('0')
+        if v and nv:
+            CARACTERISTICAS_VIEJAS[v] = nv; n += 1
+    return n
+
+cargar_caracteristicas_override()
+
+_PATRON_NO_GEOGRAFICO = re.compile(r'^(800|810|822|600|609|610|612)\d{7}$')
+
+def _area_conocida(area):
+    return area == "11" or area in CARACTERISTICAS or area in CARACTERISTICAS_VIEJAS
+
+def _match_area(d):
+    """(característica, asumida). Busca la característica conocida más larga que sea
+    prefijo de d (4, 3 o 2 dígitos); si ninguna, deduce por estructura."""
+    for L in (4, 3, 2):
+        if len(d) > L and _area_conocida(d[:L]):
+            return d[:L], False
+    if d.startswith("11"): return "11", False
+    if d and d[0] in "23" and len(d) >= 10: return d[:3], True
+    return None, False
+
+def _tipo_por_local(area, local):
+    if not local: return "desconocido"
+    if area == "11":
+        if local[0] in "47": return "fijo"
+        if local[0] in "2356": return "celular"
+        return "desconocido"
+    if local[0] == "4": return "fijo"
+    if local[0] in "56": return "celular"
+    return "desconocido"
+
+def normalizar_telefono(valor):
+    """Descompone un teléfono argentino en característica + número local.
+
+    Acepta todo lo que aparece en planillas y CRMs: 549 11 xxxx xxxx, 54 221 xxx xxxx,
+    0 2323 15 xxxxxx, 011 4xxx xxxx, 15 xxxx xxxx, 4xxx-xxxx (local del AMBA)...
+    Devuelve None si no hay nada usable; si no, dict con:
+      area          '2323' | '11' | None (no se pudo determinar)
+      local         dígitos del número local
+      tipo          'fijo' | 'celular' | 'desconocido'
+      formato       'nacional' | 'local_amba' | 'nacional_dudoso' | 'no_geografico' | 'sin_area'
+      area_asumida  True si la característica se dedujo por estructura y no por tabla
+    """
+    d = re.sub(r'\D', '', str(valor or ''))
+    if not d: return None
+    celular = False
+    if d.startswith('00'): d = d[2:]
+    if d.startswith('54') and len(d) >= 12:
+        d = d[2:]
+        if d.startswith('9') and len(d) >= 11:
+            d = d[1:]; celular = True
+    elif d.startswith('9') and len(d) == 11:
+        d = d[1:]; celular = True
+    if d.startswith('0'): d = d[1:]
+    if not d or d.startswith('000'): return None
+
+    def _armar(area, local, formato, asumida=False):
+        tipo = "celular" if celular else _tipo_por_local(area, local)
+        return {"area": area, "local": local, "tipo": tipo, "formato": formato, "area_asumida": asumida}
+
+    if _PATRON_NO_GEOGRAFICO.match(d):
+        return {"area": None, "local": d, "tipo": "desconocido", "formato": "no_geografico", "area_asumida": False}
+
+    # "15 xxxx xxxx": celular del AMBA escrito en formato local
+    if len(d) == 10 and d.startswith('15'):
+        celular = True
+        return _armar("11", d[2:], "local_amba", asumida=True)
+
+    # característica + 15 + local  (0 2323 15 xxxxxx / 0 2944 15 xxxxxx / 011 15 xxxx xxxx)
+    # Se quita el '15' del borde y se rearma el número nacional de 10 dígitos; así una
+    # característica de 3 dígitos escrita como 4 (ej: "2944 15" de Bariloche = área 2944)
+    # se reconoce igual, probando el área conocida más larga.
+    if len(d) == 12:
+        for L in (4, 3, 2):
+            if d[L:L + 2] == '15':
+                diez = d[:L] + d[L + 2:]
+                if len(diez) == 10:
+                    celular = True
+                    area, asumida = _match_area(diez)
+                    if area:
+                        return _armar(area, diez[len(area):], "nacional", asumida)
+        return None
+
+    if len(d) == 10:
+        area, asumida = _match_area(d)
+        if area: return _armar(area, d[len(area):], "nacional", asumida)
+        return {"area": None, "local": d, "tipo": "desconocido", "formato": "sin_area", "area_asumida": False}
+
+    if len(d) == 11:
+        # Un dígito de más en el número local: la característica suele estar bien igual.
+        area, asumida = _match_area(d)
+        if area and len(area) >= 3: return _armar(area, d[len(area):], "nacional_dudoso", asumida=True)
+        if d.startswith('11') and d[2:4] == '15':
+            celular = True
+            return _armar("11", d[4:], "nacional_dudoso", asumida=True)
+        return None
+
+    if len(d) == 8:
+        # Fijo (4xxx-xxxx / 7xxx-xxxx) o celular del AMBA escrito sin característica
+        if d[0] in "47": return _armar("11", d, "local_amba", asumida=True)
+        if d[0] in "2356":
+            celular = True
+            return _armar("11", d, "local_amba", asumida=True)
+        return None
+    return None
+
+def _zonas_de_area(area, local):
+    """-> (zonas, base, detalle, defecto, provincia_normalizada). base: 'central' | 'caracteristica' | 'provincia' | 'amba' | 'desconocida'.
+    defecto=True: la característica es compartida pero tiene una zona principal clara (la primera),
+    que se usa cuando nada en la fila dice lo contrario (ej: 299 = Neuquén 148, salvo que diga Cutral Có 152)."""
+    if area == "11":
+        if local and local[0] == "4" and local[:4] in CENTRALES_AMBA:
+            return [CENTRALES_AMBA[local[:4]]], "central", f"central 011-{local[:4]}", False, ""
+        return list(ZONAS_AMBA), "amba", "11", False, ""
+    if area in CARACTERISTICAS_VIEJAS:
+        area = CARACTERISTICAS_VIEJAS[area]
+    info = CARACTERISTICAS.get(area)
+    if info and info.get("zonas"):
+        cab = info.get("cabecera") or (info.get("localidades") or [""])[0]
+        return list(info["zonas"]), "caracteristica", (f"{area} ({cab})" if cab else area), bool(info.get("defecto")), normalizar(info.get("provincia", ""))
+    for pref, zonas in PREFIJOS_PROVINCIA:
+        if area.startswith(pref):
+            return list(zonas), "provincia", f"{area} (prefijo {pref})", False, ""
+    return [], "desconocida", area, False, ""
+
+_RANGO_BASE = {"central": 3, "caracteristica": 3, "provincia": 2, "amba": 0}
+
+def zona_por_telefonos(telefonos):
+    """Combina todos los teléfonos de un cliente en una sola pista geográfica.
+
+    Devuelve None si ningún teléfono aporta, o dict con:
+      candidatos  zonas posibles (la primera es la principal)
+      unica       True si la pista apunta a una sola zona
+      defecto     True si es compartida pero con zona principal clara (candidatos[0])
+      amba        True si sólo se sabe que es AMBA (101/102/104/107/110)
+      conflicto   True si dos teléfonos igual de confiables apuntan a zonas distintas
+      detalle     texto para el motivo, ej '2323 (Luján)'
+      provincias  provincias (normalizadas) de las características del interior que aportaron
+    Un fijo pesa más que un celular (los celulares viajan con la persona) y una
+    característica de una sola zona pesa más que una compartida o que el 011 genérico.
+    """
+    pistas = []
+    for t in telefonos or []:
+        p = normalizar_telefono(t)
+        if not p or not p["area"]: continue
+        zonas, base, detalle, defecto, provincia = _zonas_de_area(p["area"], p["local"])
+        if not zonas: continue
+        rango = _RANGO_BASE[base]
+        if len(zonas) > 1 and base != "amba": rango = 1
+        if p["tipo"] == "fijo": rango += 0.5
+        if p["area_asumida"]: rango -= 0.25
+        pistas.append({"zonas": zonas, "base": base, "detalle": detalle, "rango": rango, "defecto": defecto, "provincia": provincia})
+    if not pistas: return None
+    pistas.sort(key=lambda x: -x["rango"])
+    tope = pistas[0]["rango"]
+    candidatos = list(pistas[0]["zonas"])
+    detalles = [pistas[0]["detalle"]]
+    conflicto = False
+    for x in pistas[1:]:
+        inter = [z for z in candidatos if z in x["zonas"]]
+        if x["rango"] == tope:
+            if inter:
+                candidatos = inter
+            else:
+                conflicto = True
+                candidatos = candidatos + [z for z in x["zonas"] if z not in candidatos]
+            if x["detalle"] not in detalles: detalles.append(x["detalle"])
+        elif inter and len(inter) < len(candidatos):
+            candidatos = inter      # una pista más débil sólo puede achicar la duda, nunca contradecir
+            if x["detalle"] not in detalles: detalles.append(x["detalle"])
+    unica = len(candidatos) == 1 and not conflicto
+    defecto = (not unica and not conflicto and pistas[0]["defecto"] and candidatos == list(pistas[0]["zonas"]))
+    provincias = {x["provincia"] for x in pistas if x["rango"] == tope and x["provincia"]}
+    return {"candidatos": candidatos, "unica": unica, "defecto": defecto, "conflicto": conflicto,
+            "amba": set(candidatos) == set(ZONAS_AMBA), "detalle": " / ".join(detalles), "base": pistas[0]["base"],
+            "provincias": provincias}
+
+_PROVINCIAS_NORM = {normalizar(p) for p in (
+    "Buenos Aires", "Catamarca", "Chaco", "Chubut", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy",
+    "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis",
+    "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán")}
+
+def _provincia_contradice(tel, encontrados):
+    """True si la fila nombra una provincia y ninguna coincide con la de la característica del teléfono.
+    Sólo aplica a características del interior: en el AMBA 'Av. Córdoba' o 'Av. Santa Fe' son calles."""
+    prov_tel = tel.get("provincias") or set()
+    prov_fila = {f for f in encontrados if f in _PROVINCIAS_NORM}
+    return bool(prov_tel) and bool(prov_fila) and not (prov_fila & prov_tel)
+
+def _etiqueta_telefono_ambiguo(tel):
+    if tel["amba"]:
+        return "AMBA | REVISAR (" + "/".join(ZONAS_AMBA) + ")"
+    return " o ".join(tel["candidatos"]) + " | REVISAR (tel " + tel["detalle"] + ")"
+
+def _codigo_en_celda_propia(texto_fila, codigo):
+    """True si el código ocupa una celda entera de la fila ('... | 137 | ...') y no es
+    un número suelto dentro de una dirección ('SAN MARTIN 137')."""
+    return any(seg.strip() == codigo for seg in str(texto_fila or "").split("|"))
+
+# ==========================================
 # DETECCIÓN DE ZONA
 # ==========================================
 def _buscar_codigo_zona(texto_norm):
@@ -660,16 +909,24 @@ def _etiqueta_zona(codigo):
     if codigo in ZONAS_ESPECIALES: return f"{codigo} | {ZONAS_ESPECIALES[codigo]}"
     return str(codigo)
 
-def detectar_zona(texto_fila, zona_cruda="", nombre_cliente=""):
+def detectar_zona(texto_fila, zona_cruda="", nombre_cliente="", telefonos=None):
     """Motor de zonas. Devuelve dict con codigo, etiqueta, confianza y motivo.
 
     Orden de confianza:
-      1. Código de zona escrito en la celda de Zona/Localidad  -> altísima
-      2. Localidad reconocida en la celda de Zona/Localidad    -> alta
-      3. Código de zona en cualquier parte de la fila          -> media
-      4. Localidad reconocida en cualquier parte de la fila    -> media/baja
-      5. Lo que diga la celda cruda, tal cual                  -> sin clasificar
+      1. Código de zona escrito en la celda de Zona/Localidad          -> alta
+      2. Localidad reconocida en la celda de Zona/Localidad            -> alta
+         (si la localidad es ambigua, ej. LAS HERAS, el teléfono desempata)
+      3. Teléfono con característica de una sola zona                  -> media (alta si la fila lo confirma)
+         Le gana a un código o localidad sueltos en la fila (suelen ser números
+         de calle o calles con nombre de provincia), pero no a un código que
+         ocupa una celda entera.
+      4. Código de zona en cualquier parte de la fila                  -> media
+      5. Localidad reconocida en cualquier parte de la fila            -> media/baja
+         (el teléfono desempata, o descarta calles tipo 'Av. Córdoba')
+      6. Teléfono que sólo acota la región (AMBA, '140 o 144')         -> ambigua
+      7. Lo que diga la celda cruda, tal cual                          -> sin clasificar
 
+    telefonos: lista ya extraída con separar_telefonos(); si es None se extrae de la fila.
     Al mirar la fila entera se tapa antes el nombre del cliente, así una razón
     social como 'ELENA SRL' o 'DEVOTO S.A.' no se confunde con esos pueblos.
     """
@@ -679,44 +936,109 @@ def detectar_zona(texto_fila, zona_cruda="", nombre_cliente=""):
     if nombre_norm and len(nombre_norm) >= 4 and nombre_norm != zona_norm:
         fila_norm = fila_norm.replace(nombre_norm, " " * len(nombre_norm))
 
+    if telefonos is None:
+        telefonos = separar_telefonos(texto_fila) if str(texto_fila or "").strip() else []
+    tel = zona_por_telefonos(telefonos)
+
+    def _res(cod, conf, motivo):
+        return {"codigo": cod, "etiqueta": _etiqueta_zona(cod), "confianza": conf, "motivo": motivo}
+
+    def _ambigua(codigos, encontrados):
+        return {"codigo": None, "etiqueta": " o ".join(codigos) + " | REVISAR (" + ", ".join(encontrados[:3]) + ")",
+                "confianza": "ambigua", "motivo": "la localidad pertenece a más de una zona"}
+
+    # 1 y 2) La celda de zona manda
     if zona_norm:
         cod, origen = _buscar_codigo_zona(zona_norm)
         if cod:
-            return {"codigo": cod, "etiqueta": _etiqueta_zona(cod), "confianza": "alta",
-                    "motivo": f"código en la celda de zona ({origen})"}
+            return _res(cod, "alta", f"código en la celda de zona ({origen})")
 
         puntajes, encontrados = _puntuar_por_localidades(zona_norm)
         mejores = _mejores_zonas(puntajes)
         if len(mejores) == 1:
-            return {"codigo": mejores[0], "etiqueta": _etiqueta_zona(mejores[0]), "confianza": "alta",
-                    "motivo": f"localidad en la celda de zona: {', '.join(encontrados[:3])}"}
+            return _res(mejores[0], "alta", f"localidad en la celda de zona: {', '.join(encontrados[:3])}")
         if len(mejores) > 1:
-            return {"codigo": None, "etiqueta": " o ".join(mejores) + " | REVISAR (" + ", ".join(encontrados[:3]) + ")",
-                    "confianza": "ambigua", "motivo": "la localidad pertenece a más de una zona"}
+            if tel:
+                inter = [m for m in mejores if m in tel["candidatos"]]
+                if len(inter) == 1:
+                    return _res(inter[0], "alta", f"localidad ambigua en la celda de zona ({', '.join(encontrados[:2])}) "
+                                                  f"desempatada por el teléfono {tel['detalle']}")
+            return _ambigua(mejores, encontrados)
 
-    cod, origen = _buscar_codigo_zona(fila_norm)
-    if cod:
-        return {"codigo": cod, "etiqueta": _etiqueta_zona(cod), "confianza": "media",
-                "motivo": f"código en la fila ({origen})"}
-
+    cod_fila, origen_fila = _buscar_codigo_zona(fila_norm)
     puntajes, encontrados = _puntuar_por_localidades(fila_norm)
     mejores = _mejores_zonas(puntajes)
-    if len(mejores) == 1:
-        conf = "media" if puntajes[mejores[0]] >= PESO_ALIAS else "baja"
-        return {"codigo": mejores[0], "etiqueta": _etiqueta_zona(mejores[0]), "confianza": conf,
-                "motivo": f"localidad en la fila: {', '.join(encontrados[:3])}"}
-    if len(mejores) > 1:
-        return {"codigo": None, "etiqueta": " o ".join(mejores) + " | REVISAR (" + ", ".join(encontrados[:3]) + ")",
-                "confianza": "ambigua", "motivo": "la localidad pertenece a más de una zona"}
+    peso_top = puntajes[mejores[0]] if mejores else 0
 
+    # 3) Teléfono que apunta a una sola zona (o compartida con principal clara, si la fila no la contradice)
+    if tel and (tel["unica"] or (tel["defecto"] and (not mejores or tel["candidatos"][0] in mejores))):
+        z = tel["candidatos"][0]
+        podria = "" if tel["unica"] else f" (podría ser {'/'.join(tel['candidatos'][1:])})"
+        if cod_fila == z:
+            return _res(z, "alta", f"código en la fila y teléfono {tel['detalle']} coinciden")
+        if cod_fila and _codigo_en_celda_propia(texto_fila, cod_fila):
+            return _res(cod_fila, "media", f"código en la fila ({origen_fila}); el teléfono {tel['detalle']} sugiere {z}")
+        if mejores == [z]:
+            return _res(z, "alta", f"localidad en la fila ({', '.join(encontrados[:2])}) y teléfono {tel['detalle']} coinciden")
+        if z in mejores:
+            return _res(z, "media", f"teléfono {tel['detalle']}; desempata la localidad de la fila ({', '.join(encontrados[:2])})")
+        if mejores and _provincia_contradice(tel, encontrados):
+            # La fila dice 'CORDOBA' y el teléfono es de Misiones: seguramente un celular de otro lado. Que lo revise una persona.
+            codigos = sorted(set(mejores + [z]))
+            return {"codigo": None, "etiqueta": " o ".join(codigos) + f" | REVISAR ({', '.join(encontrados[:2])} vs tel {tel['detalle']})",
+                    "confianza": "ambigua", "motivo": "la provincia escrita en la fila no coincide con la del teléfono"}
+        extra = ""
+        if mejores: extra += f"; en la fila aparece {', '.join(encontrados[:2])} ({'/'.join(mejores)})"
+        if cod_fila: extra += f"; hay un {cod_fila} suelto en la fila"
+        return _res(z, "media", f"teléfono {tel['detalle']}{podria}{extra}")
+
+    # 4) Código en la fila
+    if cod_fila:
+        return _res(cod_fila, "media", f"código en la fila ({origen_fila})")
+
+    # 5) Localidad en la fila (el teléfono desempata o filtra)
+    if len(mejores) == 1:
+        z = mejores[0]
+        if tel and z in tel["candidatos"]:
+            return _res(z, "media", f"localidad en la fila ({', '.join(encontrados[:2])}) confirmada por el teléfono {tel['detalle']}")
+        if tel and peso_top < PESO_LOCALIDAD:
+            pass    # sólo una provincia/alias suelto (ej: 'Av. Córdoba') y el teléfono dice otra cosa: no vale
+        else:
+            conf = "media" if peso_top >= PESO_ALIAS else "baja"
+            motivo = f"localidad en la fila: {', '.join(encontrados[:3])}"
+            if tel and not tel["amba"]:
+                conf = "baja"
+                motivo += f" (el teléfono {tel['detalle']} apunta a {'/'.join(tel['candidatos'][:5])})"
+            return _res(z, conf, motivo)
+    elif len(mejores) > 1:
+        if tel:
+            inter = [m for m in mejores if m in tel["candidatos"]]
+            if len(inter) == 1:
+                return _res(inter[0], "media", f"localidad ambigua en la fila ({', '.join(encontrados[:2])}) "
+                                               f"desempatada por el teléfono {tel['detalle']}")
+            if inter: mejores = inter
+        return _ambigua(mejores, encontrados)
+
+    # 6) Teléfono que sólo acota la región
     zc = str(zona_cruda).strip()
-    if zc and zc.lower() not in ("nan", "none"):
-        return {"codigo": None, "etiqueta": zc, "confianza": "sin clasificar", "motivo": "se dejó el texto original"}
+    tiene_texto = bool(zc) and zc.lower() not in ("nan", "none")
+    if tel and tel["defecto"]:
+        return _res(tel["candidatos"][0], "media", f"teléfono {tel['detalle']} (podría ser {'/'.join(tel['candidatos'][1:])})")
+    if tel and not tiene_texto:
+        motivo = "el teléfono sólo acota la región"
+        if tel["conflicto"]: motivo += " (teléfonos en conflicto)"
+        return {"codigo": None, "etiqueta": _etiqueta_telefono_ambiguo(tel), "confianza": "ambigua", "motivo": motivo}
+
+    # 7) Texto crudo
+    if tiene_texto:
+        motivo = "se dejó el texto original"
+        if tel: motivo += f"; el teléfono acota a {'/'.join(tel['candidatos'][:5])}"
+        return {"codigo": None, "etiqueta": zc, "confianza": "sin clasificar", "motivo": motivo}
     return {"codigo": None, "etiqueta": "Desconocida", "confianza": "nula", "motivo": "sin datos de ubicación"}
 
-def extraer_zona_inteligente(texto_fila, zona_cruda, nombre_cliente=""):
+def extraer_zona_inteligente(texto_fila, zona_cruda, nombre_cliente="", telefonos=None):
     """Compatibilidad: devuelve sólo la etiqueta '137 | CORDOBA'."""
-    return detectar_zona(texto_fila, zona_cruda, nombre_cliente)["etiqueta"]
+    return detectar_zona(texto_fila, zona_cruda, nombre_cliente, telefonos)["etiqueta"]
 
 # ==========================================
 # DETECCIÓN DE VENDEDOR
@@ -801,6 +1123,21 @@ def extraer_vendedor_inteligente(texto_crudo, vendedor_actual, zona_o_cobrador, 
 # ==========================================
 # LÓGICA DE LIMPIEZA Y EXTRACCIÓN
 # ==========================================
+# CUIT/CUIL sin guiones: 11 dígitos que empiezan en 20/23/24/27 (personas) o 30/33/34
+# (empresas) y validan el dígito verificador. El ERP a veces los mete en la columna de
+# contacto; sin esto se exportan como si fueran un teléfono.
+_PREFIJOS_CUIT = ("20", "23", "24", "27", "30", "33", "34")
+_PESOS_CUIT = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+
+def _es_cuit(num):
+    if len(num) != 11 or not num.isdigit() or num[:2] not in _PREFIJOS_CUIT:
+        return False
+    suma = sum(int(num[i]) * _PESOS_CUIT[i] for i in range(10))
+    verif = 11 - (suma % 11)
+    if verif == 11: verif = 0
+    if verif == 10: return False   # caso especial de CUIT; no lo tratamos como CUIT
+    return verif == int(num[10])
+
 def separar_telefonos(texto_crudo):
     if pd.isna(texto_crudo): return []
     texto = str(texto_crudo).strip()
@@ -823,7 +1160,7 @@ def separar_telefonos(texto_crudo):
             continue
 
         # Si el bloque ya tiene la longitud ideal de un celular, lo guardamos directo
-        if 8 <= len(num_puro) <= 15:
+        if 8 <= len(num_puro) <= 15 and not _es_cuit(num_puro):
             telefonos_limpios.append(num_puro)
 
         # Si tiene MÁS de 15 dígitos, es probable que haya dos o más teléfonos distintos pegados
@@ -833,7 +1170,7 @@ def separar_telefonos(texto_crudo):
             sub_bloques = re.split(r'[\s\-\.]+', bloque.strip())
             for sub in sub_bloques:
                 sub_puro = ''.join(filter(str.isdigit, sub))
-                if 8 <= len(sub_puro) <= 15 and not sub_puro.startswith("000"):
+                if 8 <= len(sub_puro) <= 15 and not sub_puro.startswith("000") and not _es_cuit(sub_puro):
                     telefonos_limpios.append(sub_puro)
 
     # 4. Retornar la lista eliminando duplicados pero manteniendo el orden de aparición
@@ -1011,7 +1348,7 @@ def procesar_cruce(df_maestro, progress_callback=None):
             texto_total = str(row['Row_String'])
 
             telefonos_encontrados = separar_telefonos(texto_total)
-            zona = detectar_zona(texto_total, zona_o_cobr, n)
+            zona = detectar_zona(texto_total, zona_o_cobr, n, telefonos_encontrados)
             vend = detectar_vendedor(texto_total, v, zona_o_cobr, zona["codigo"], n)
 
             # --- NUEVA REGLA ULTRA PERMISIVA ---
@@ -1366,7 +1703,7 @@ def actualizar_ubicaciones_excel(ruta_origen, ruta_destino=None, plan=None, form
                 detalle_hoja["sin_cambios"] += 1
                 continue
 
-            zona = detectar_zona(texto_fila, valor_zona_actual or "", nombre_cliente)
+            zona = detectar_zona(texto_fila, valor_zona_actual or "", nombre_cliente, separar_telefonos(texto_fila))
             if zona["codigo"] is None and zona["confianza"] != "ambigua":
                 # No se pudo reconocer la ubicación: la celda se deja exactamente como estaba.
                 detalle_hoja["sin_ubicacion"] += 1
