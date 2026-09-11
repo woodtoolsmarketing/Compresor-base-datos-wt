@@ -1372,6 +1372,10 @@ def procesar_cruce(df_maestro, progress_callback=None):
                 continue
             if "clientes habilitados" in n_low or "cód." in n_low:
                 continue
+            # Registros dados de baja en el ERP ("NO EXISTEN MAS" / "NO EXISTE MAS"):
+            # tienen teléfono viejo pero el cliente ya no existe, así que se descartan.
+            if re.search(r'NO EXISTE[N]? MAS', normalizar(texto_total)):
+                continue
 
             registro = {
                 'Nombre': n if n not in ["", "nan"] else "Cliente Sin Nombre",
