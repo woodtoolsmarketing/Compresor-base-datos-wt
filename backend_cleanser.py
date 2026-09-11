@@ -1326,8 +1326,12 @@ def procesar_cruce(df_maestro, progress_callback=None):
         if progress_callback: progress_callback(5, "Estandarizando memoria en bloque...")
         df = df_maestro.copy()
         cargar_vinculos_zonas(forzar_recarga=True)   # una sola lectura del JSON para todo el cruce
+        # Los clientes sin código real ("SinID_<n>", generado por archivo) no deben agrupar
+        # entre sí: dos archivos distintos repiten "SinID_5" y se fusionarían clientes ajenos.
+        # Se les da una clave única por fila; los códigos reales sí agrupan entre archivos.
         df['Clave_Agrupacion'] = df['Numero_Cliente'].replace("", np.nan)
-        df['Clave_Agrupacion'] = np.where(df['Clave_Agrupacion'].isna(), df['Nombre'].astype(str) + "_" + df.index.astype(str), df['Clave_Agrupacion'])
+        sin_codigo = df['Clave_Agrupacion'].isna() | df['Clave_Agrupacion'].astype(str).str.startswith("SinID_")
+        df['Clave_Agrupacion'] = np.where(sin_codigo, "SF_" + df['Nombre'].astype(str) + "_" + df.index.astype(str), df['Clave_Agrupacion'])
 
         if progress_callback: progress_callback(15, "Agrupando clientes duplicados en alta velocidad...")
         for col in ['Nombre', 'Vendedor', 'Zona_Cruda']:
